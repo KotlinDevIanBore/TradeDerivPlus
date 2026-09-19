@@ -1,0 +1,64 @@
+# Local development dependencies. The API itself runs on the host via `go run`.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tradederivplus-db
+    environment:
+      POSTGRES_USER: tdp
+      POSTGRES_PASSWORD: tdp
+      POSTGRES_DB: tradederivplus
+    ports:
+      # 5434 on the host to avoid colliding with a local Postgres or another
+      # project's container.
+      - "5434:5432"
+    volumes:
+      - tdp_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tdp -d tradederivplus"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: tradederivplus-prometheus
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      # The scrape token. Create it with:
+      #   echo -n "$METRICS_TOKEN" > deploy/prometheus/metrics_token
+      - ./deploy/prometheus/metrics_token:/etc/prometheus/metrics_token:ro
+      - tdp_prometheus:/prometheus
+    extra_hosts:
+      # Lets the container scrape the API running on the host.
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: tradederivplus-grafana
+    profiles: ["observability"]
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      # Datasource and dashboards are provisioned from files in git, so they
+      # survive the container and are reviewable in a pull request.
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      - tdp_grafana:/var/lib/grafana
+
+volumes:
+  tdp_pgdata:
+  tdp_prometheus:
+  tdp_grafana:

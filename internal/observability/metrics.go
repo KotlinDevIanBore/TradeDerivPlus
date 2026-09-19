@@ -1,0 +1,145 @@
+package observability
+
+import (
+	"context"
+	"log/slog"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+// Metrics. Infrastructure numbers plus the business ones that actually say
+// whether the platform is healthy, which is what a dashboard is for.
+var (
+	requestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "Request latency by route.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
+	}, []string{"route", "method", "status"})
+
+	requestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Requests by route and status.",
+	}, []string{"route", "method", "status"})
+
+	wsConnections = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "ws_connections",
+		Help: "Currently connected WebSocket clients.",
+	})
+
+	// The Daraja health signal. A spike in failures here reaches an alert
+	// before it reaches support.
+	depositsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "deposits_total",
+		Help: "M-Pesa deposits by outcome.",
+	}, []string{"status"})
+
+	tradesOpen = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "trades_open",
+		Help: "Open positions across the platform.",
+	})
+
+	adminActionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "admin_actions_total",
+		Help: "Audited admin actions by kind.",
+	}, []string{"action"})
+
+	// The invariant the whole money design rests on, watched continuously
+	// rather than checked once per test run. Anything but zero means a balance
+	// moved without a matching ledger row. Alert on > 0 for 2 minutes.
+	ledgerDrift = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "ledger_drift_accounts",
+		Help: "Accounts whose ledger sum disagrees with their cached balance. Must be zero.",
+	})
+)
+
+// RecordDeposit is called when a deposit settles either way.
+func RecordDeposit(status string) { depositsTotal.WithLabelValues(status).Inc() }
+
+// RecordAdminAction is called after each audited admin action.
+func RecordAdminAction(action string) { adminActionsTotal.WithLabelValues(action).Inc() }
+
+// Middleware records latency and outcome. It labels by the route pattern, not
+// the raw path, so an id in the URL does not explode the label cardinality.
+func Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		status := strconv.Itoa(c.Writer.Status())
+
+		requestDuration.WithLabelValues(route, c.Request.Method, status).Observe(time.Since(start).Seconds())
+		requestsTotal.WithLabelValues(route, c.Request.Method, status).Inc()
+	}
+}
+
+// Sampler is what the collector needs from the rest of the app to fill the
+// gauges. Keeping it an interface means observability does not import the
+// repository or the transport.
+type Sampler interface {
+	OpenTrades(ctx context.Context) (int, error)
+	DriftedAccounts(ctx context.Context) (int, error)
+	Connections() int
+}
+
+// Collect refreshes the gauges on an interval until ctx is cancelled.
+func Collect(ctx context.Context, s Sampler, log *slog.Logger, every time.Duration) {
+	sample := func() {
+		sampleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
+		if n, err := s.OpenTrades(sampleCtx); err == nil {
+			tradesOpen.Set(float64(n))
+		} else {
+			log.Warn("metrics: open trades", "err", err)
+		}
+
+		if n, err := s.DriftedAccounts(sampleCtx); err == nil {
+			ledgerDrift.Set(float64(n))
+			if n > 0 {
+				// Worth a log line too: whoever reads logs should not have to
+				// be watching Grafana to learn money has gone missing.
+				log.Error("LEDGER DRIFT DETECTED", "accounts", n)
+			}
+		} else {
+			log.Warn("metrics: ledger drift", "err", err)
+		}
+
+		wsConnections.Set(float64(s.Connections()))
+	}
+
+	sample()
+	t := time.NewTicker(every)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sample()
+		}
+	}
+}
+
+// MetricsHandler serves /metrics behind a bearer token. A public metrics
+// endpoint leaks deposit volumes and user counts, so it is never open.
+func MetricsHandler(token string, h gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if token != "" {
+			auth := c.GetHeader("Authorization")
+			if auth != "Bearer "+token {
+				c.AbortWithStatus(401)
+				return
+			}
+		}
+		h(c)
+	}
+}

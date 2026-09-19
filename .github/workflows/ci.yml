@@ -1,0 +1,198 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+env:
+  GO_VERSION: "1.22"
+  NODE_VERSION: "20"
+
+jobs:
+  go:
+    name: Go tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tdp
+          POSTGRES_PASSWORD: tdp
+          POSTGRES_DB: tradederivplus_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal ./pkg ./scripts)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test -race ./...
+
+      # The concurrency tests run against a real Postgres. They are the ones
+      # that prove the row locks in the money path actually hold, which a fake
+      # store cannot show. Coverage is measured here because these are the
+      # tests that exercise the money path.
+      - name: Integration tests
+        run: >-
+          go test -tags integration -race -count=1
+          -coverprofile=coverage.out -covermode=atomic
+          ./internal/service/...
+        env:
+          DATABASE_URL: postgres://tdp:tdp@localhost:5432/tradederivplus_test?sslmode=disable
+
+      # The gate is on the money-path files rather than the package, because
+      # the feed and signal services are dominated by long-running loops that
+      # are legitimately hard to cover, and a package-wide gate would be
+      # satisfied by padding those instead.
+      #
+      # The floor is a ratchet, not a target. It is set just under what the
+      # suite achieves today so it catches a regression without failing on the
+      # day it lands; raise it whenever coverage climbs. A gate that fails on
+      # arrival gets disabled, which is worse than no gate at all.
+      - name: Coverage gate on the money path
+        run: |
+          go tool cover -func=coverage.out > coverage.txt
+          floor=75
+          fail=0
+          for file in wallet_service.go trading_service.go admin_service.go; do
+            pct=$(awk -v f="$file" '$1 ~ f {
+              gsub(/%/, "", $NF); total += $NF; n++
+            } END { if (n > 0) printf "%.1f", total / n; else print "0" }' coverage.txt)
+            echo "$file: ${pct}% (floor ${floor}%)"
+            awk -v p="$pct" -v f="$floor" 'BEGIN { exit (p >= f) ? 0 : 1 }' || {
+              echo "::error::$file is at ${pct}% line coverage, below the ${floor}% floor"
+              fail=1
+            }
+          done
+          exit $fail
+
+  web:
+    name: Web tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Includes the PnL parity suite, which replays the Go implementation's
+      # own vectors through the TypeScript formula.
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  e2e:
+    name: End to end
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tdp
+          POSTGRES_PASSWORD: tdp
+          POSTGRES_DB: tradederivplus
+        ports: ["5434:5432"]
+        options: >-
+          --health-cmd "pg_isready -U tdp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Start the API in mock mode
+        run: |
+          go build -o /tmp/tdp-api ./cmd/api
+          /tmp/tdp-api &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/health && break
+            sleep 1
+          done
+        env:
+          APP_ENV: development
+          DATABASE_URL: postgres://tdp:tdp@localhost:5434/tradederivplus?sslmode=disable
+          JWT_SECRET: ci-only-secret-not-used-anywhere-real
+          USE_MOCK_FEED: "true"
+          USE_MOCK_MPESA: "true"
+          # Loosened from the production default so a suite that registers
+          # dozens of users is not fighting the limiter, but still tight
+          # enough that smoke.py's concurrent burst proves it fires.
+          AUTH_RATE_EVERY: 200ms
+          AUTH_RATE_BURST: 25
+
+      - name: Seed the admin and KYC fixtures
+        run: go run ./cmd/seed
+        env:
+          APP_ENV: development
+          DATABASE_URL: postgres://tdp:tdp@localhost:5434/tradederivplus?sslmode=disable
+          JWT_SECRET: ci-only-secret-not-used-anywhere-real
+
+      - name: API smoke tests
+        run: |
+          python3 scripts/smoke.py
+          python3 scripts/sltp_check.py
+          python3 scripts/admin_check.py
+          go run ./scripts/wscheck http://localhost:8080/api/v1 6
+
+      - name: Install Playwright
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        working-directory: web
+        run: npx playwright test
+        env:
+          VITE_API_URL: http://localhost:8080/api/v1
+          VITE_WS_URL: ws://localhost:8080/api/v1/ws
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7

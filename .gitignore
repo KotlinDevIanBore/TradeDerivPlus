@@ -1,0 +1,28 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Go
+/bin/
+*.test
+tradederivplus
+
+# Node
+node_modules/
+web/dist/
+web/node_modules/
+web/.vite/
+*.log
+npm-debug.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+.env.*
+!.env.example
+deploy/prometheus/metrics_token
+deploy/prometheus/metrics_token
+.claude/
+web/test-results/

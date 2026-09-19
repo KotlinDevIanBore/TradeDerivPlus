@@ -1,0 +1,51 @@
+groups:
+  - name: tradederivplus-money
+    rules:
+      # The invariant the whole money design rests on. Anything but zero means
+      # a balance moved without a matching ledger row, which is the one class
+      # of bug that silently destroys money. Two minutes of tolerance lets a
+      # sampling race settle without suppressing a real drift.
+      - alert: LedgerDrift
+        expr: ledger_drift_accounts > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} account(s) drifted from the ledger"
+          description: >-
+            A wallet balance disagrees with the sum of its ledger rows.
+            Stop and investigate before processing further withdrawals.
+
+      # A Daraja outage shows up as failures long before users complain.
+      - alert: DepositFailureRate
+        expr: >-
+          sum(rate(deposits_total{status="failed"}[10m]))
+          /
+          clamp_min(sum(rate(deposits_total[10m])), 0.001) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than half of deposits are failing"
+          description: "Check Daraja availability and the callback URL."
+
+  - name: tradederivplus-api
+    rules:
+      - alert: HighErrorRate
+        expr: >-
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_requests_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 5% of requests are failing with a server error"
+
+      - alert: APIDown
+        expr: up{job="tradederivplus-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "The API is not being scraped"

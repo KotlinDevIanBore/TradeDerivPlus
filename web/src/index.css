@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root { color-scheme: dark; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-text font-sans antialiased;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+  /* Prices and money must not reflow as digits change. */
+  .tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+  /* Hide scrollbars on horizontal chip strips without losing scrollability. */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+}

@@ -1,0 +1,12 @@
+apiVersion: 1
+
+# Dashboards are provisioned from files in git rather than clicked together in
+# the UI, so they survive a container being recreated and are reviewable.
+providers:
+  - name: TradeDerivPlus
+    folder: TradeDerivPlus
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

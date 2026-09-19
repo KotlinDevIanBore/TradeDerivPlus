@@ -1,0 +1,86 @@
+[
+  {
+    "direction": "buy",
+    "entry": "100",
+    "current": "110",
+    "stake": "50",
+    "want": "5"
+  },
+  {
+    "direction": "buy",
+    "entry": "100",
+    "current": "90",
+    "stake": "50",
+    "want": "-5"
+  },
+  {
+    "direction": "sell",
+    "entry": "100",
+    "current": "90",
+    "stake": "50",
+    "want": "5"
+  },
+  {
+    "direction": "sell",
+    "entry": "100",
+    "current": "110",
+    "stake": "50",
+    "want": "-5"
+  },
+  {
+    "direction": "buy",
+    "entry": "100",
+    "current": "100",
+    "stake": "50",
+    "want": "0"
+  },
+  {
+    "direction": "buy",
+    "entry": "1.08540",
+    "current": "1.08640",
+    "stake": "1000",
+    "want": "0.92"
+  },
+  {
+    "direction": "sell",
+    "entry": "1.08540",
+    "current": "1.08440",
+    "stake": "1000",
+    "want": "0.92"
+  },
+  {
+    "direction": "buy",
+    "entry": "4685.559",
+    "current": "4690.123",
+    "stake": "250",
+    "want": "0.24"
+  },
+  {
+    "direction": "sell",
+    "entry": "9977.7528",
+    "current": "9950.0001",
+    "stake": "75.50",
+    "want": "0.21"
+  },
+  {
+    "direction": "buy",
+    "entry": "157.220",
+    "current": "157.905",
+    "stake": "33.33",
+    "want": "0.15"
+  },
+  {
+    "direction": "buy",
+    "entry": "0.00001",
+    "current": "0.00002",
+    "stake": "10",
+    "want": "10"
+  },
+  {
+    "direction": "sell",
+    "entry": "12345.6789",
+    "current": "12345.6788",
+    "stake": "1000000",
+    "want": "0.01"
+  }
+]
