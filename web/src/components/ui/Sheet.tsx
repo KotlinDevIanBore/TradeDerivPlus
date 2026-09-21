@@ -17,9 +17,11 @@ interface SheetProps {
   /**
    * Where it comes from. `bottom` is the sheet everything else uses; `left` is
    * the navigation drawer, which stays a drawer at every width because only a
-   * phone ever opens it.
+   * phone ever opens it; `panel` is a panel's phone form, which fills the
+   * screen and never becomes the centred dialog a bottom sheet becomes,
+   * because by that width a panel is a column and not a dialog at all.
    */
-  side?: 'bottom' | 'left'
+  side?: 'bottom' | 'left' | 'panel'
 }
 
 /**
@@ -40,6 +42,10 @@ export function Sheet({
   side = 'bottom',
 }: SheetProps) {
   const drawer = side === 'left'
+  const panel = side === 'panel'
+  // Both fill an edge of the screen and scroll inside themselves.
+  const column = drawer || panel
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -53,7 +59,10 @@ export function Sheet({
                   'inset-y-0 left-0 flex w-[86%] max-w-[320px] flex-col',
                   'rounded-r-3xl border-r animate-slide-in-left',
                 ]
-              : [
+              : panel
+                ? // A panel's phone form takes the whole screen.
+                  'inset-0 flex flex-col animate-slide-up'
+                : [
                   // Mobile: bottom sheet.
                   'inset-x-0 bottom-0 rounded-t-3xl border-t animate-slide-up',
                   full ? 'top-0 rounded-t-none' : 'max-h-[85vh]',
@@ -66,7 +75,7 @@ export function Sheet({
           )}
         >
           {/* Drag handle, bottom sheets only. */}
-          {!full && !drawer ? (
+          {!full && !column ? (
             <div className="flex justify-center pt-3 sm:hidden" aria-hidden>
               <div className="h-1 w-10 rounded-full bg-border" />
             </div>
@@ -93,7 +102,7 @@ export function Sheet({
             ) : null}
           </div>
 
-          <div className={cn('overflow-y-auto px-5 pb-6', (full || drawer) && 'flex-1')}>
+          <div className={cn('overflow-y-auto px-5 pb-6', (full || column) && 'flex-1')}>
             {children}
           </div>
         </Dialog.Content>
