@@ -1,5 +1,5 @@
 import { Suspense, lazy } from 'react'
-import { Skeleton } from '@/components/ui/Skeleton'
+import { ChartSkeleton } from './ChartSkeleton'
 
 /**
  * The charting library is the largest dependency in the app. Loading it only
@@ -12,7 +12,7 @@ const PriceChart = lazy(() =>
 
 export function PriceChartLazy(props: React.ComponentProps<typeof PriceChart>) {
   return (
-    <Suspense fallback={<Skeleton className="h-[240px] w-full rounded-none lg:h-[340px]" />}>
+    <Suspense fallback={<ChartSkeleton />}>
       <PriceChart {...props} />
     </Suspense>
   )

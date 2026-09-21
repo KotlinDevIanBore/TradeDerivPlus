@@ -104,6 +104,12 @@ export function HomeScreen() {
       <div className="space-y-3">
         {openTrades.isLoading ? (
           <Skeleton className="h-[140px] w-full rounded-card" />
+        ) : openTrades.isError ? (
+          // Without this the block renders as empty, which reads as "you have no
+          // positions" when the truth is that we could not find out.
+          <div className="rounded-card border border-border bg-surface">
+            <ErrorState error={openTrades.error} onRetry={() => openTrades.refetch()} compact />
+          </div>
         ) : (
           <OpenPositionsSummary trades={openTrades.data?.items ?? []} />
         )}

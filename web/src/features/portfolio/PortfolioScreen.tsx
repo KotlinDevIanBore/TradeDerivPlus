@@ -144,6 +144,11 @@ export function PortfolioScreen() {
             <Skeleton className="h-[68px] flex-1 rounded-card" />
             <Skeleton className="h-[68px] flex-1 rounded-card" />
           </>
+        ) : summary.isError ? (
+          // Three dashes cannot tell a failed load from a flat day, so say which.
+          <div className="flex-1 rounded-card border border-border bg-surface">
+            <ErrorState error={summary.error} onRetry={() => summary.refetch()} compact />
+          </div>
         ) : (
           <>
             <SummaryTile label="Open P&L">
