@@ -9,6 +9,18 @@ export function newPhone(): string {
 
 export const PASSWORD = 'hunter2024'
 
+/**
+ * Navigates using whichever chrome the current viewport actually shows -- the
+ * bottom bar on a phone, the sidebar on a desktop. These specs run in both
+ * projects, and they care about arriving, not about which bar got them there.
+ */
+export async function goTo(page: Page, destination: string) {
+  await page
+    .locator('nav:visible')
+    .getByRole('link', { name: destination, exact: true })
+    .click()
+}
+
 /** Registers through the UI, which is also how the signup path gets covered. */
 export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.goto('/register')

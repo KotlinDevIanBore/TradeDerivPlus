@@ -15,11 +15,15 @@ const tabs: Tab[] = [
   { to: '/wallet', label: 'Wallet', icon: Wallet },
 ]
 
-/** Bottom tab bar on mobile. The desktop sidebar renders the same four links. */
+/**
+ * Bottom tab bar on mobile. The desktop sidebar renders the same four links,
+ * so the two carry distinct landmark names: both are in the DOM at once and
+ * only one is ever on screen.
+ */
 export function TabBar() {
   return (
     <nav
-      aria-label="Main"
+      aria-label="Bottom"
       className={cn(
         'fixed inset-x-0 bottom-0 z-30 h-tabbar border-t border-hairline',
         'bg-bg/90 backdrop-blur-lg lg:hidden',

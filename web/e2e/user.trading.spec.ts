@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { newPhone, register } from './helpers'
+import { goTo, newPhone, register } from './helpers'
 
 test.describe('A user trading', () => {
   test('registers, opens a position, and closes it with the balance adding up', async ({ page }) => {
@@ -11,7 +11,7 @@ test.describe('A user trading', () => {
     await expect(balanceCard.getByText('$10,000.00', { exact: true })).toBeVisible()
     await expect(balanceCard.getByText('demo', { exact: true })).toBeVisible()
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Trade', exact: true }).first().click()
+    await goTo(page, 'Trade')
     await page.waitForURL('**/trade*')
 
     // The ticket stays disabled until a live price arrives.
@@ -26,12 +26,12 @@ test.describe('A user trading', () => {
     await expect(page.getByText('Your positions on R_75')).toBeVisible()
 
     // The stake left the balance.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Home', exact: true }).first().click()
+    await goTo(page, 'Home')
     await expect(
       page.locator('section[aria-label="Balance"]').getByText('$9,900.00', { exact: true }),
     ).toBeVisible()
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Portfolio', exact: true }).first().click()
+    await goTo(page, 'Portfolio')
     await page.getByRole('button', { name: 'Close position' }).first().click()
 
     // The confirmation restates the position before anything settles.
@@ -41,11 +41,20 @@ test.describe('A user trading', () => {
     await expect(page.getByText('Position closed')).toBeVisible()
 
     // The stake plus its result came back, so the total is near where it was.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Home', exact: true }).first().click()
+    await goTo(page, 'Home')
     const balance = await page.locator('section[aria-label="Balance"] p').nth(1).innerText()
     const value = Number(balance.replace(/[$,]/g, ''))
     expect(value).toBeGreaterThan(9_000)
     expect(value).toBeLessThan(11_000)
+
+    // Walking away and back must leave the feed alone. The screens visited
+    // above all want R_75 priced while the position is open, and a screen
+    // letting go of a symbol used to close the socket for everyone.
+    await goTo(page, 'Trade')
+    await expect(page.getByRole('button', { name: /Buy R_75 for/ })).toBeEnabled({
+      timeout: 30_000,
+    })
+    await expect(page.getByText('Market feed offline')).toHaveCount(0)
   })
 
   test('refuses a stake larger than the balance, naming the limit', async ({ page }) => {
