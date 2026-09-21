@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
 export const API = process.env.VITE_API_URL ?? 'http://localhost:8080/api/v1'
 
@@ -21,7 +21,6 @@ export const PASSWORD = 'hunter2024'
  */
 const WIDE_LABELS: Record<string, string> = {
   Trade: 'Trade',
-  Portfolio: 'Positions',
   Wallet: 'History',
   Signals: 'Signals',
 }
@@ -36,6 +35,47 @@ export async function goTo(page: Page, destination: string) {
 
   const label = wide ? (WIDE_LABELS[destination] ?? destination) : destination
   await page.locator('nav:visible').getByRole('link', { name: label, exact: true }).click()
+}
+
+function isWide(page: Page) {
+  return (page.viewportSize()?.width ?? 0) >= 1024
+}
+
+/**
+ * The Positions panel, whichever container it is in: a column in the page on a
+ * desktop, a modal sheet on a phone. Specs care that the positions are there,
+ * not which of the two is rendering them.
+ */
+export function positionsPanel(page: Page) {
+  return page
+    .getByRole('complementary', { name: 'Positions' })
+    .or(page.getByRole('dialog', { name: 'Positions' }))
+}
+
+/**
+ * Opens the panel however this viewport opens it, and leaves it open.
+ *
+ * On a desktop the control is a toggle, and a one-shot "is it open?" check
+ * raced the render that follows a route change: probe too early, decide it is
+ * closed, and the click that follows shuts a panel that had just opened. So
+ * the whole open-and-check retries until the panel is actually there.
+ */
+export async function openPositions(page: Page) {
+  const panel = positionsPanel(page)
+
+  await expect(async () => {
+    if (!(await panel.isVisible())) {
+      if (isWide(page)) await page.getByRole('button', { name: 'Positions' }).click()
+      else await page.locator('nav:visible').getByRole('link', { name: 'Positions' }).click()
+    }
+    await expect(panel).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 20_000 })
+}
+
+export async function closePositions(page: Page) {
+  // Exact: "Close Positions" would otherwise also answer to a search for the
+  // "Close position" button on a card, which is a different thing entirely.
+  await page.getByRole('button', { name: 'Close Positions', exact: true }).click()
 }
 
 /** Registers through the UI, which is also how the signup path gets covered. */

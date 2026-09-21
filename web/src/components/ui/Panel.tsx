@@ -62,6 +62,7 @@ export function Panel({
       }}
       side="panel"
       title={title}
+      closeLabel={`Close ${title}`}
     >
       {children}
     </Sheet>

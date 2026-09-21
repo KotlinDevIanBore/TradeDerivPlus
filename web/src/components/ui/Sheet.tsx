@@ -14,6 +14,8 @@ interface SheetProps {
   /** Full height instead of the default content-sized sheet. */
   full?: boolean
   showClose?: boolean
+  /** Names what is being closed, where "Close" alone would be ambiguous. */
+  closeLabel?: string
   /**
    * Where it comes from. `bottom` is the sheet everything else uses; `left` is
    * the navigation drawer, which stays a drawer at every width because only a
@@ -39,6 +41,7 @@ export function Sheet({
   className,
   full,
   showClose = true,
+  closeLabel = 'Close',
   side = 'bottom',
 }: SheetProps) {
   const drawer = side === 'left'
@@ -95,7 +98,7 @@ export function Sheet({
             {showClose ? (
               <Dialog.Close
                 className="-mr-1 -mt-1 rounded-lg p-2 text-muted transition-colors hover:bg-surface hover:text-text"
-                aria-label="Close"
+                aria-label={closeLabel}
               >
                 <X className="h-5 w-5" />
               </Dialog.Close>

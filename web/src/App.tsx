@@ -9,6 +9,7 @@ import { RegisterScreen } from '@/features/auth/RegisterScreen'
 import { HomeScreen } from '@/features/home/HomeScreen'
 import { ProfileScreen } from '@/features/profile/ProfileScreen'
 import { AppShell } from '@/features/shell/AppShell'
+import { PanelRedirect } from '@/features/shell/redirects'
 import { SignalsScreen } from '@/features/signals/SignalsScreen'
 import { TradeScreen } from '@/features/trading/TradeScreen'
 import { WalletScreen } from '@/features/wallet/WalletScreen'
@@ -59,7 +60,10 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<HomeScreen />} />
             <Route path="/trade" element={<TradeScreen />} />
-            <Route path="/portfolio" element={<Navigate to="/trade?panel=positions" replace />} />
+            <Route
+              path="/portfolio"
+              element={<PanelRedirect panel="positions" carry={['tab']} />}
+            />
             <Route path="/wallet" element={<WalletScreen />} />
             <Route path="/signals" element={<SignalsScreen />} />
             <Route path="/profile" element={<ProfileScreen />} />

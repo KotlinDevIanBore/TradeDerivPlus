@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test'
-import { goTo, newPhone, register } from './helpers'
+import {
+  closePositions,
+  goTo,
+  newPhone,
+  openPositions,
+  positionsPanel,
+  register,
+} from './helpers'
 
 test.describe('A user trading', () => {
   test('registers, opens a position, and closes it with the balance adding up', async ({ page }) => {
@@ -31,14 +38,26 @@ test.describe('A user trading', () => {
       page.locator('section[aria-label="Balance"]').getByText('$9,900.00', { exact: true }),
     ).toBeVisible()
 
-    await goTo(page, 'Portfolio')
-    await page.getByRole('button', { name: 'Close position' }).first().click()
+    // Positions is a panel over the chart now, not a screen to travel to.
+    await goTo(page, 'Trade')
+    await openPositions(page)
+    await positionsPanel(page)
+      .getByRole('button', { name: 'Close position', exact: true })
+      .first()
+      .click()
 
     // The confirmation restates the position before anything settles.
     await expect(page.getByText(/^Close R_75/)).toBeVisible()
-    await page.getByRole('button', { name: 'Close position' }).last().click()
+    await page
+      .getByRole('dialog', { name: 'Close position' })
+      .getByRole('button', { name: 'Close position', exact: true })
+      .click()
 
     await expect(page.getByText('Position closed')).toBeVisible()
+
+    // On a phone the panel is a modal and holds the app behind it, so it has
+    // to be put away before anything else is reachable.
+    await closePositions(page)
 
     // The stake plus its result came back, so the total is near where it was.
     await goTo(page, 'Home')
