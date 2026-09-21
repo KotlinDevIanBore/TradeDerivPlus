@@ -11,14 +11,31 @@ export const PASSWORD = 'hunter2024'
 
 /**
  * Navigates using whichever chrome the current viewport actually shows -- the
- * bottom bar on a phone, the sidebar on a desktop. These specs run in both
+ * bottom bar on a phone, the top bar on a desktop. These specs run in both
  * projects, and they care about arriving, not about which bar got them there.
+ *
+ * The two do not agree on names: the top bar already calls its destinations
+ * what they are becoming (Positions, History), while the bottom bar still says
+ * Portfolio and Wallet. Home has no top-bar entry at all -- the logo is the
+ * way back, as it will be when Trade becomes the app's surface.
  */
+const WIDE_LABELS: Record<string, string> = {
+  Trade: 'Trade',
+  Portfolio: 'Positions',
+  Wallet: 'History',
+  Signals: 'Signals',
+}
+
 export async function goTo(page: Page, destination: string) {
-  await page
-    .locator('nav:visible')
-    .getByRole('link', { name: destination, exact: true })
-    .click()
+  const wide = (page.viewportSize()?.width ?? 0) >= 1024
+
+  if (wide && destination === 'Home') {
+    await page.getByRole('link', { name: 'TradeDerivPlus home' }).click()
+    return
+  }
+
+  const label = wide ? (WIDE_LABELS[destination] ?? destination) : destination
+  await page.locator('nav:visible').getByRole('link', { name: label, exact: true }).click()
 }
 
 /** Registers through the UI, which is also how the signup path gets covered. */

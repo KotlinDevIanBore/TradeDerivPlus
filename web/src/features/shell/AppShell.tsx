@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -7,11 +6,14 @@ import { toast } from '@/components/ui/Toast'
 import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
 import { usePriceFeed } from '@/hooks/usePriceFeed'
 import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
-import { useCreateAccount, useMe } from '@/hooks/useQueries'
+import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
 import { money, signedMoney } from '@/lib/format'
-import { useIsAuthenticated } from '@/store/session'
+import { DepositSheet } from '@/features/wallet/DepositSheet'
+import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
+import { useIsAuthenticated, useSessionStore } from '@/store/session'
 import { AccountSwitcher } from './AccountSwitcher'
-import { Sidebar, TabBar } from './TabBar'
+import { overlay, useOverlayOpen } from './overlays'
+import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
 
@@ -23,11 +25,26 @@ import { useActiveAccount } from './useActiveAccount'
 export function AppShell() {
   const isAuthenticated = useIsAuthenticated()
   const location = useLocation()
-  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const { account, accountId, accounts, isLoading, error, refetch } = useActiveAccount()
   const createAccount = useCreateAccount()
   useMe()
+
+  // The shell needs the balance for the account pill, and the withdraw sheet
+  // needs it too. Same query key the screens use, so this is not a second
+  // request -- it is the same one, asked for one level higher.
+  const wallet = useWallet(accountId)
+  const realAccount = accounts.find((a) => a.account_type === 'real') ?? null
+  const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
+
+  const accountsOpen = useOverlayOpen('accounts')
+  const depositOpen = useOverlayOpen('deposit')
+  const withdrawOpen = useOverlayOpen('withdraw')
+  // Radix reports both directions; only the closing one is ours to act on,
+  // since every opening goes through the overlay API.
+  const onDismiss = (open: boolean) => {
+    if (!open) overlay.close()
+  }
 
   // The price and signal sockets live here, for the whole session. Screens say
   // which symbols they need with useWatchSymbols; none of them owns a
@@ -93,7 +110,14 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <TopBar account={account} isLoading={isLoading} onOpenSwitcher={() => setSwitcherOpen(true)} />
+      <TopBar
+        account={account}
+        wallet={wallet.data}
+        isLoading={isLoading}
+        onOpenMenu={overlay.menu}
+        onOpenSwitcher={overlay.accounts}
+        onDeposit={overlay.deposit}
+      />
 
       {error ? (
         <div className="flex items-center gap-2 border-b border-accent/30 bg-accent-subtle px-gutter py-2 lg:px-6">
@@ -111,7 +135,6 @@ export function AppShell() {
       ) : null}
 
       <div className="mx-auto flex w-full max-w-[1200px] flex-1">
-        <Sidebar />
         <main className="min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8">
           <Outlet />
         </main>
@@ -120,11 +143,29 @@ export function AppShell() {
       <TabBar />
 
       <AccountSwitcher
-        open={switcherOpen}
-        onOpenChange={setSwitcherOpen}
+        open={accountsOpen}
+        onOpenChange={onDismiss}
         accounts={accounts}
         activeAccountId={accountId}
         isLoading={isLoading}
+      />
+
+      <DepositSheet
+        open={depositOpen}
+        onOpenChange={onDismiss}
+        account={account}
+        realAccount={realAccount}
+        onSwitchToReal={() => {
+          if (realAccount) setActiveAccount(realAccount.id)
+          overlay.close()
+        }}
+      />
+
+      <WithdrawSheet
+        open={withdrawOpen}
+        onOpenChange={onDismiss}
+        account={account}
+        wallet={wallet.data}
       />
     </div>
   )

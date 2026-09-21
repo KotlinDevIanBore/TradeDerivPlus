@@ -16,9 +16,11 @@ const tabs: Tab[] = [
 ]
 
 /**
- * Bottom tab bar on mobile. The desktop sidebar renders the same four links,
- * so the two carry distinct landmark names: both are in the DOM at once and
- * only one is ever on screen.
+ * Bottom tab bar on mobile. Desktop navigation lives in the top bar, so this
+ * is the only bar of its kind and carries its own landmark name.
+ *
+ * It goes away when Home is dissolved and Trade becomes the app's surface;
+ * until then it is how a phone reaches the four screens that still exist.
  */
 export function TabBar() {
   return (
@@ -44,36 +46,6 @@ export function TabBar() {
             >
               <Icon className="h-6 w-6" aria-hidden />
               <span className="text-[11px] font-medium">{label}</span>
-            </NavLink>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  )
-}
-
-/** Desktop sidebar: the same destinations, laid out vertically. */
-export function Sidebar() {
-  return (
-    <nav
-      aria-label="Main"
-      className="hidden w-[220px] shrink-0 border-r border-hairline px-3 py-6 lg:block"
-    >
-      <ul className="space-y-1">
-        {tabs.map(({ to, label, icon: Icon }) => (
-          <li key={to}>
-            <NavLink
-              to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                cn(
-                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-body font-medium transition-colors',
-                  isActive ? 'bg-accent-subtle text-accent' : 'text-muted hover:bg-surface hover:text-text',
-                )
-              }
-            >
-              <Icon className="h-5 w-5" aria-hidden />
-              {label}
             </NavLink>
           </li>
         ))}
