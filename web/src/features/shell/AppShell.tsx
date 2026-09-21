@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/EmptyState'
+import { Panel } from '@/components/ui/Panel'
 import { toast } from '@/components/ui/Toast'
 import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
 import { usePriceFeed } from '@/hooks/usePriceFeed'
@@ -9,6 +10,7 @@ import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
+import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
 import { useIsAuthenticated, useSessionStore } from '@/store/session'
@@ -18,7 +20,7 @@ import { overlay, useOverlayOpen } from './overlays'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
-import { MAIN_SURFACE } from './usePanel'
+import { MAIN_SURFACE, usePanel } from './usePanel'
 
 /**
  * The persistent frame around every authenticated screen. It owns account
@@ -42,6 +44,7 @@ export function AppShell() {
 
   const menuOpen = useOverlayOpen('menu')
   const onMainSurface = location.pathname === MAIN_SURFACE
+  const { panel, close: closePanel } = usePanel()
 
   const accountsOpen = useOverlayOpen('accounts')
   const depositOpen = useOverlayOpen('deposit')
@@ -141,6 +144,14 @@ export function AppShell() {
       ) : null}
 
       <div className="flex w-full flex-1">
+        {/* A column beside the chart on a desktop, a full-screen sheet on a
+            phone. It is mounted once, here, so the panel outlives whichever
+            screen is under it -- and so its content keeps the symbols it
+            watches registered with the shell's one price feed. */}
+        <Panel open={panel === 'positions'} onClose={closePanel} title="Positions">
+          <PositionsPanel />
+        </Panel>
+
         <main
           className={cn(
             'min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8',

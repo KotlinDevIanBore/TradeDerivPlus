@@ -1,4 +1,4 @@
-import { useLocation, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { mergeParams } from '@/lib/searchParams'
 
@@ -50,14 +50,19 @@ export function resolvePanel(
 export function usePanel() {
   const [params, setParams] = useSearchParams()
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const desktop = useIsDesktop()
 
-  const panel = resolvePanel(params.get('panel'), {
-    desktop,
-    onMainSurface: pathname === MAIN_SURFACE,
-  })
+  const onMainSurface = pathname === MAIN_SURFACE
+  const panel = resolvePanel(params.get('panel'), { desktop, onMainSurface })
 
-  const open = (name: PanelName) => setParams(mergeParams({ panel: name }))
+  const href = (name: PanelName) => `${MAIN_SURFACE}?panel=${name}`
+
+  // A panel only exists over the main surface, so asking for one from
+  // somewhere else means going there with it open.
+  const open = (name: PanelName) =>
+    onMainSurface ? setParams(mergeParams({ panel: name })) : navigate(href(name))
+
   const close = () => setParams(mergeParams({ panel: desktop ? CLOSED : null }))
 
   return {
@@ -66,6 +71,6 @@ export function usePanel() {
     close,
     toggle: (name: PanelName) => (panel === name ? close() : open(name)),
     /** For links that must arrive with a panel already open. */
-    href: (name: PanelName) => `${MAIN_SURFACE}?panel=${name}`,
+    href,
   }
 }

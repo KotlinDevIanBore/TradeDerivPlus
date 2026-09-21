@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/cn'
 import type { Account, Wallet } from '@/types'
+import { MAIN_SURFACE, usePanel } from './usePanel'
 
 interface NavItem {
   to: string
@@ -34,11 +35,17 @@ interface NavItem {
  * to it and this entry goes away.
  */
 const items: NavItem[] = [
-  { to: '/trade', label: 'Trade', icon: CandlestickChart },
-  { to: '/portfolio', label: 'Positions', icon: Briefcase },
+  { to: MAIN_SURFACE, label: 'Trade', icon: CandlestickChart },
   { to: '/wallet', label: 'History', icon: History },
   { to: '/signals', label: 'Signals', icon: Bot },
 ]
+
+/** One treatment for the row, whether the item is a link or a panel toggle. */
+const item = (active: boolean) =>
+  cn(
+    'flex items-center gap-2 rounded-lg px-3 py-2 text-body font-medium transition-colors',
+    active ? 'bg-accent-subtle text-accent' : 'text-muted hover:bg-surface hover:text-text',
+  )
 
 export function TopBar({
   account,
@@ -55,6 +62,8 @@ export function TopBar({
   onOpenSwitcher: () => void
   onDeposit: () => void
 }) {
+  const panel = usePanel()
+
   return (
     <header className="sticky top-0 z-30 border-b border-hairline bg-bg/90 backdrop-blur-lg">
       <div className="flex h-topbar items-center gap-2 px-gutter lg:gap-4 lg:px-6">
@@ -76,17 +85,30 @@ export function TopBar({
 
         <nav aria-label="Main" className="hidden lg:block">
           <ul className="flex items-center gap-1">
+            {/* Positions is a toggle, not a destination: it opens and closes a
+                column that sits beside the chart rather than replacing it.
+                aria-pressed says so, the way the chart's range control does. */}
+            <li>
+              <button
+                type="button"
+                onClick={() => panel.toggle('positions')}
+                aria-pressed={panel.panel === 'positions'}
+                className={item(panel.panel === 'positions')}
+              >
+                <Briefcase className="h-4 w-4" aria-hidden />
+                Positions
+              </button>
+            </li>
+
             {items.map(({ to, label, icon: Icon }) => (
               <li key={to}>
                 <NavLink
                   to={to}
                   className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-2 rounded-lg px-3 py-2 text-body font-medium transition-colors',
-                      isActive
-                        ? 'bg-accent-subtle text-accent'
-                        : 'text-muted hover:bg-surface hover:text-text',
-                    )
+                    // Trade is the surface the panel sits on, so it stops
+                    // claiming to be the active thing while a panel is open.
+                    // Two lit items read as two places to be.
+                    item(isActive && !(to === MAIN_SURFACE && panel.panel !== null))
                   }
                 >
                   <Icon className="h-4 w-4" aria-hidden />

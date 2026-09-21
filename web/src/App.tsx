@@ -7,7 +7,6 @@ import { Toaster } from '@/components/ui/Toast'
 import { LoginScreen } from '@/features/auth/LoginScreen'
 import { RegisterScreen } from '@/features/auth/RegisterScreen'
 import { HomeScreen } from '@/features/home/HomeScreen'
-import { PortfolioScreen } from '@/features/portfolio/PortfolioScreen'
 import { ProfileScreen } from '@/features/profile/ProfileScreen'
 import { AppShell } from '@/features/shell/AppShell'
 import { SignalsScreen } from '@/features/signals/SignalsScreen'
@@ -60,7 +59,7 @@ export default function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<HomeScreen />} />
             <Route path="/trade" element={<TradeScreen />} />
-            <Route path="/portfolio" element={<PortfolioScreen />} />
+            <Route path="/portfolio" element={<Navigate to="/trade?panel=positions" replace />} />
             <Route path="/wallet" element={<WalletScreen />} />
             <Route path="/signals" element={<SignalsScreen />} />
             <Route path="/profile" element={<ProfileScreen />} />

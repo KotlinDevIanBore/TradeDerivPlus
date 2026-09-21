@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Bot,
+  Briefcase,
   History,
   LogOut,
   User as UserIcon,
@@ -12,6 +13,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { useLogout } from '@/hooks/useAuth'
 import { cn } from '@/lib/cn'
 import { overlay } from './overlays'
+import { usePanel } from './usePanel'
 
 const row =
   'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-body font-medium transition-colors'
@@ -72,6 +74,7 @@ function Action({
  */
 export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const logout = useLogout()
+  const { href } = usePanel()
   const close = () => onOpenChange(false)
 
   return (
@@ -82,9 +85,15 @@ export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange:
       <div className="flex min-h-full flex-col">
         <nav aria-label="Menu">
           <ul className="-mx-1 space-y-0.5">
-            <Action label="Deposit" icon={ArrowDownToLine} onClick={overlay.deposit} />
-            <Action label="Withdraw" icon={ArrowUpFromLine} onClick={overlay.withdraw} />
-            <Destination to="/wallet" label="History" icon={History} onNavigate={close} />
+          <Action label="Deposit" icon={ArrowDownToLine} onClick={overlay.deposit} />
+          <Action label="Withdraw" icon={ArrowUpFromLine} onClick={overlay.withdraw} />
+          <Destination
+            to={href('positions')}
+            label="Positions"
+            icon={Briefcase}
+            onNavigate={close}
+          />
+          <Destination to="/wallet" label="History" icon={History} onNavigate={close} />
             <Destination to="/signals" label="Signals" icon={Bot} onNavigate={close} />
             <Destination to="/profile" label="Account" icon={UserIcon} onNavigate={close} />
           </ul>

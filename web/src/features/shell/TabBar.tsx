@@ -1,6 +1,7 @@
-import { NavLink } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { CandlestickChart, Home, Wallet, Briefcase, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { MAIN_SURFACE, usePanel } from './usePanel'
 
 interface Tab {
   to: string
@@ -8,21 +9,36 @@ interface Tab {
   icon: LucideIcon
 }
 
-const tabs: Tab[] = [
-  { to: '/', label: 'Home', icon: Home },
-  { to: '/trade', label: 'Trade', icon: CandlestickChart },
-  { to: '/portfolio', label: 'Portfolio', icon: Briefcase },
-  { to: '/wallet', label: 'Wallet', icon: Wallet },
-]
-
 /**
  * Bottom tab bar on mobile. Desktop navigation lives in the top bar, so this
  * is the only bar of its kind and carries its own landmark name.
  *
  * It goes away when Home is dissolved and Trade becomes the app's surface;
- * until then it is how a phone reaches the four screens that still exist.
+ * until then it is how a phone reaches what still exists. Positions is already
+ * a panel rather than a screen, so its tab arrives at the surface with the
+ * panel open, and highlights on the panel rather than on the path.
  */
 export function TabBar() {
+  const { pathname } = useLocation()
+  const { panel, href } = usePanel()
+
+  const tabs: (Tab & { active: boolean })[] = [
+    { to: '/', label: 'Home', icon: Home, active: pathname === '/' },
+    {
+      to: MAIN_SURFACE,
+      label: 'Trade',
+      icon: CandlestickChart,
+      active: pathname === MAIN_SURFACE && panel === null,
+    },
+    {
+      to: href('positions'),
+      label: 'Positions',
+      icon: Briefcase,
+      active: panel === 'positions',
+    },
+    { to: '/wallet', label: 'Wallet', icon: Wallet, active: pathname === '/wallet' },
+  ]
+
   return (
     <nav
       aria-label="Bottom"
@@ -32,21 +48,19 @@ export function TabBar() {
       )}
     >
       <ul className="flex h-full">
-        {tabs.map(({ to, label, icon: Icon }) => (
-          <li key={to} className="flex-1">
-            <NavLink
+        {tabs.map(({ to, label, icon: Icon, active }) => (
+          <li key={label} className="flex-1">
+            <Link
               to={to}
-              end={to === '/'}
-              className={({ isActive }) =>
-                cn(
-                  'flex h-full flex-col items-center justify-center gap-1 transition-colors',
-                  isActive ? 'text-accent' : 'text-muted hover:text-text',
-                )
-              }
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex h-full flex-col items-center justify-center gap-1 transition-colors',
+                active ? 'text-accent' : 'text-muted hover:text-text',
+              )}
             >
               <Icon className="h-6 w-6" aria-hidden />
               <span className="text-[11px] font-medium">{label}</span>
-            </NavLink>
+            </Link>
           </li>
         ))}
       </ul>
