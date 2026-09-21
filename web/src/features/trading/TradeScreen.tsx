@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { LineChart } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { ConnectionDot } from '@/components/ConnectionDot'
 import { DirectionBadge } from '@/components/DirectionBadge'
+import { EmptyState } from '@/components/EmptyState'
 import { Money } from '@/components/Money'
 import { PriceTag } from '@/components/PriceTag'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
-import { Skeleton } from '@/components/ui/Skeleton'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { signalHref } from '@/features/signals/SignalCard'
@@ -17,6 +18,7 @@ import {
   useOpenTrade,
   useSignals,
   useSymbols,
+  useTradeSummary,
   useTrades,
   useWallet,
 } from '@/hooks/useQueries'
@@ -28,8 +30,11 @@ import { pnl } from '@/lib/pnl'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
 import { ChartRangeToggle } from './ChartRangeToggle'
 import { windowChange, type ChartRange, type WindowChange } from './chartRange'
+import { ChartSkeleton } from './ChartSkeleton'
 import { PriceChartLazy } from './PriceChartLazy'
 import { OrderTicket, type TicketValues } from './OrderTicket'
+import { SessionStrip } from './SessionStrip'
+import { sessionStats } from './sessionStats'
 import { SymbolPicker } from './SymbolPicker'
 
 const DEFAULT_SYMBOL = 'R_75'
@@ -44,6 +49,9 @@ export function TradeScreen() {
   const symbolsQuery = useSymbols()
   const wallet = useWallet(accountId)
   const openTrades = useTrades(accountId, 'open', 50)
+  const summary = useTradeSummary(accountId)
+  // Same query key Portfolio uses, so the two screens share one fetch.
+  const closedTrades = useTrades(accountId, 'closed', 50)
   const openTrade = useOpenTrade()
   const closeTrade = useCloseTrade()
 
@@ -77,6 +85,11 @@ export function TradeScreen() {
   // Movement across the window the chart is drawing, not a daily change: the
   // server keeps a short rolling tick buffer, so there is no daily open price.
   const change = useMemo(() => windowChange(history, range), [history, range])
+
+  const session = useMemo(
+    () => sessionStats(closedTrades.data?.items ?? []),
+    [closedTrades.data],
+  )
 
   // After five seconds with no tick, say so rather than spinning forever.
   useEffect(() => {
@@ -179,23 +192,26 @@ export function TradeScreen() {
 
         <div className="relative mt-2">
           {history.length === 0 ? (
-            <div className="flex h-[240px] items-center justify-center lg:h-[340px]">
-              {waitedForPrice ? (
-                <div className="text-center">
-                  <p className="text-body text-muted">No price data for this symbol yet</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => window.location.reload()}
-                  >
-                    Try again
-                  </Button>
-                </div>
-              ) : (
-                <Skeleton className="h-full w-full rounded-none" />
-              )}
-            </div>
+            waitedForPrice ? (
+              <div className="flex h-[240px] items-center justify-center lg:h-[340px]">
+                <EmptyState
+                  icon={LineChart}
+                  title="No price data yet"
+                  hint={
+                    symbol
+                      ? `Nothing has arrived for ${symbol.code} yet. The chart draws itself as soon as the feed sends a tick.`
+                      : 'The chart draws itself as soon as the feed sends a tick.'
+                  }
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                      Try again
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <ChartSkeleton />
+            )
           ) : (
             <PriceChartLazy
               ticks={history}
@@ -229,6 +245,15 @@ export function TradeScreen() {
             <span className="ml-auto text-meta font-semibold text-accent">Apply</span>
           </button>
         ) : null}
+
+        <div className="mt-3 px-gutter lg:px-0">
+          <SessionStrip
+            summary={summary.data}
+            session={session}
+            isLoading={summary.isLoading}
+            stale={stale}
+          />
+        </div>
 
         {symbolTrades.length > 0 ? (
           <section className="mt-4 px-gutter lg:px-0" aria-label="Open positions on this symbol">

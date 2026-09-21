@@ -122,8 +122,10 @@ export function OrderTicket({
     if (!entry || !level || entry.isZero()) return undefined
 
     const pct = dec(level).minus(entry).dividedBy(entry).times(100)
-    const distance = `${pct.isNegative() ? '' : '+'}${pct.toFixed(2)}% from price`
-    if (stakeValue.lessThanOrEqualTo(0)) return distance
+    // "away" rather than "from price", so the projection below fits one line in
+    // the ticket's two-column grid.
+    const distance = `${pct.isNegative() ? '' : '+'}${pct.toFixed(2)}% away`
+    if (stakeValue.lessThanOrEqualTo(0)) return `${distance} from price`
 
     const projected = pnl(direction, entry, dec(level), stakeValue)
     return `${distance} · ${signedMoney(projected.toString())} if hit`
