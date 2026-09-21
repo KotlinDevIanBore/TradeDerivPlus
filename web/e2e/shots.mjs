@@ -1,4 +1,5 @@
-// Throwaway screenshot runner for the implementation report. Not a test.
+// Screenshot runner for the implementation reports. Not a test -- Playwright
+// only collects *.spec.ts, so this never runs with the suite.
 // Usage: node e2e/shots.mjs <out-dir> [--drawer]
 import { chromium, devices } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
