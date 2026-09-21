@@ -73,8 +73,9 @@ export function SignalsScreen() {
         ))}
       </div>
 
+      {/* The pill clears the top bar, plus a little air so it does not touch it. */}
       {newCount > 0 ? (
-        <div className="sticky top-16 z-20 flex justify-center px-gutter">
+        <div className="sticky top-[calc(theme(spacing.topbar)+8px)] z-20 flex justify-center px-gutter">
           <button
             type="button"
             onClick={() => {

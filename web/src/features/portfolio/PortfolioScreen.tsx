@@ -229,7 +229,7 @@ export function PortfolioScreen() {
             <div className="px-gutter lg:px-6">
               {closedByDay.map(([day, trades]) => (
                 <section key={day} className="mb-4">
-                  <h3 className="sticky top-14 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
+                  <h3 className="sticky top-topbar z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
                     {day}
                   </h3>
                   <ul className="divide-y divide-hairline rounded-card border border-border bg-surface">

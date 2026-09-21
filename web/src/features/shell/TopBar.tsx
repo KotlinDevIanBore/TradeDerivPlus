@@ -16,7 +16,7 @@ export function TopBar({
 }) {
   return (
     <header className="sticky top-0 z-30 border-b border-hairline bg-bg/90 backdrop-blur-lg">
-      <div className="flex h-14 items-center justify-between gap-3 px-gutter lg:px-6">
+      <div className="flex h-topbar items-center justify-between gap-3 px-gutter lg:px-6">
         <Link to="/" className="flex shrink-0 items-center gap-2" aria-label="TradeDerivPlus home">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
             <TrendingUp className="h-4 w-4 text-white" aria-hidden />

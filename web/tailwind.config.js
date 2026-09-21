@@ -52,6 +52,10 @@ export default {
       spacing: {
         gutter: '16px',
         tabbar: '64px',
+        // The sticky top bar's height. Anything that pins itself below the bar
+        // reads it from here, so the bar's height is stated in one place
+        // instead of being hand-matched at each sticky element.
+        topbar: '56px',
       },
       keyframes: {
         'flash-up':   { '0%': { color: '#22C55E' }, '100%': { color: 'inherit' } },
