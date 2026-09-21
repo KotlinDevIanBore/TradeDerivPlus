@@ -19,7 +19,7 @@ export function DirectionBadge({
       className={cn(
         'inline-flex items-center rounded-md font-bold uppercase tracking-wide',
         direction === 'buy' ? 'bg-profit text-black' : 'bg-accent text-white',
-        size === 'sm' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-1 text-[11px]',
+        size === 'sm' ? 'px-1.5 py-0.5 text-nano' : 'px-2 py-1 text-[11px]',
         className,
       )}
     >

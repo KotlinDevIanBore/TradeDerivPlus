@@ -28,15 +28,26 @@ export default {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
       },
       fontSize: {
+        // nano is for uppercase chips and axis-style labels only; body copy
+        // never goes below meta.
+        nano:    ['10px', { lineHeight: '14px' }],
         meta:    ['12px', { lineHeight: '16px' }],
         body:    ['14px', { lineHeight: '20px' }],
         card:    ['16px', { lineHeight: '24px' }],
+        section: ['20px', { lineHeight: '28px' }],
         title:   ['24px', { lineHeight: '32px' }],
         hero:    ['36px', { lineHeight: '40px' }],
       },
       borderRadius: {
         card: '16px',
         pill: '999px',
+      },
+      // Depth on near-black surfaces has to come from shadow, not brightness:
+      // lifting a card's fill would flatten the difference between surface and
+      // elevated. Both are deliberately quiet.
+      boxShadow: {
+        card:     '0 1px 2px 0 rgba(0,0,0,0.5)',
+        elevated: '0 8px 24px -6px rgba(0,0,0,0.7)',
       },
       spacing: {
         gutter: '16px',
