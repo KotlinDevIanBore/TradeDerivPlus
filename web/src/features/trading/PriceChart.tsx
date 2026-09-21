@@ -13,6 +13,7 @@ import { dec } from '@/lib/money'
 import type { Tick } from '@/types'
 
 import type { ChartRange } from './chartRange'
+import { chartTheme } from './chartTheme'
 
 /**
  * The tick chart. There is no candle endpoint, so this draws the tick series
@@ -50,7 +51,10 @@ export function PriceChart({
     return data[data.length - 1].value >= data[0].value
   }, [data])
 
-  const stroke = rising ? '#22C55E' : '#E24B4A'
+  const stroke = rising ? chartTheme.up : chartTheme.down
+
+  /** The latest tick, marked on the scale so "now" is readable against it. */
+  const current = data.at(-1)?.value
 
   // Pad the domain so the line never touches the edges and the reference lines
   // stay visible when they sit just outside the traded range.
@@ -67,12 +71,25 @@ export function PriceChart({
     return [min - pad, max + pad]
   }, [data, stopLoss, takeProfit])
 
+  /**
+   * The scale only needs enough precision to tell its own ticks apart, which is
+   * usually far less than the instrument's pip size: a volatility index spanning
+   * 40 points reads better as 4,247.3 than 4,247.3283, and on a phone the longer
+   * label does not fit beside the chart at all. Forex, spanning a fraction of a
+   * pip, still gets every decimal.
+   */
+  const axisDecimals = useMemo(() => {
+    const span = domain[1] - domain[0]
+    const needed = span >= 100 ? 0 : span >= 10 ? 1 : span >= 1 ? 2 : span >= 0.1 ? 3 : pipSize
+    return Math.min(needed, pipSize)
+  }, [domain, pipSize])
+
   if (data.length === 0) return null
 
   return (
     <div className={cn('h-[240px] w-full transition-opacity lg:h-[340px]', stale && 'opacity-40', className)}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 0, bottom: 0, left: 8 }}>
           <defs>
             <linearGradient id="priceFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={stroke} stopOpacity={0.22} />
@@ -80,37 +97,54 @@ export function PriceChart({
             </linearGradient>
           </defs>
 
-          <YAxis domain={domain} hide />
+          {/* The scale sits on the right, where a trader reads the last price. */}
+          <YAxis
+            domain={domain}
+            orientation="right"
+            width={64}
+            tickCount={4}
+            tickMargin={6}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fill: chartTheme.axis, fontSize: 12 }}
+            tickFormatter={(value: number) => fmtPrice(String(value), axisDecimals)}
+          />
 
           <Tooltip
             contentStyle={{
-              background: '#1A1A1D',
-              border: '1px solid #232326',
+              background: chartTheme.tooltipBg,
+              border: `1px solid ${chartTheme.border}`,
               borderRadius: 12,
               fontSize: 12,
             }}
             labelFormatter={() => ''}
             formatter={(value) => [fmtPrice(String(value), pipSize), 'Price']}
-            cursor={{ stroke: '#232326', strokeWidth: 1 }}
+            cursor={{ stroke: chartTheme.border, strokeWidth: 1 }}
           />
+
+          {/* Where the last tick sits against the scale. Grey, so it never
+              competes with the red and green of the levels below. */}
+          {current !== undefined ? (
+            <ReferenceLine y={current} stroke={chartTheme.border} strokeDasharray="2 4" strokeWidth={1} />
+          ) : null}
 
           {stopLoss ? (
             <ReferenceLine
               y={dec(stopLoss).toNumber()}
-              stroke="#E24B4A"
+              stroke={chartTheme.down}
               strokeDasharray="4 4"
               strokeWidth={1}
-              label={{ value: 'SL', position: 'insideLeft', fill: '#E24B4A', fontSize: 10 }}
+              label={{ value: 'SL', position: 'insideLeft', fill: chartTheme.down, fontSize: 10 }}
             />
           ) : null}
 
           {takeProfit ? (
             <ReferenceLine
               y={dec(takeProfit).toNumber()}
-              stroke="#22C55E"
+              stroke={chartTheme.up}
               strokeDasharray="4 4"
               strokeWidth={1}
-              label={{ value: 'TP', position: 'insideLeft', fill: '#22C55E', fontSize: 10 }}
+              label={{ value: 'TP', position: 'insideLeft', fill: chartTheme.up, fontSize: 10 }}
             />
           ) : null}
 
