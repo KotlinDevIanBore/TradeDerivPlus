@@ -44,8 +44,18 @@ for (const [name, opts] of viewports) {
     await page.screenshot({ path: `${out}/${name}-home.png` })
   }
 
-  await page.goto('http://localhost:5173/trade')
+  await page.goto('http://localhost:5173/trade?panel=none')
   await page.waitForTimeout(4000)
+
+  if (flag('position')) {
+    const buy = page.getByRole('button', { name: /Buy R_75 for/ })
+    await buy.waitFor({ timeout: 30_000 })
+    await page.getByLabel('Stake').fill('100')
+    await buy.click()
+    await page.getByText('Position opened').waitFor()
+    await page.waitForTimeout(2500)
+  }
+
   await page.screenshot({ path: `${out}/${name}-trade.png` })
 
   if (flag('panel')) {

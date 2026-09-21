@@ -68,6 +68,11 @@ test.describe('The Positions panel', () => {
 
     await openPositions(page)
     const panel = positionsPanel(page)
+
+    // The chart and the panel want the same symbol priced at the same time.
+    // A signed figure on the card means the panel is being fed, not just open.
+    await expect(panel.getByText(/^[+-]\$\d/).first()).toBeVisible({ timeout: 15_000 })
+
     await panel.getByRole('button', { name: 'Close position', exact: true }).first().click()
 
     // A dialog over a panel: on a phone that is a dialog over a dialog, which
