@@ -12,6 +12,7 @@ import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
 import { useIsAuthenticated, useSessionStore } from '@/store/session'
 import { AccountSwitcher } from './AccountSwitcher'
+import { NavDrawer } from './NavDrawer'
 import { overlay, useOverlayOpen } from './overlays'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
@@ -37,6 +38,7 @@ export function AppShell() {
   const realAccount = accounts.find((a) => a.account_type === 'real') ?? null
   const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
 
+  const menuOpen = useOverlayOpen('menu')
   const accountsOpen = useOverlayOpen('accounts')
   const depositOpen = useOverlayOpen('deposit')
   const withdrawOpen = useOverlayOpen('withdraw')
@@ -141,6 +143,8 @@ export function AppShell() {
       </div>
 
       <TabBar />
+
+      <NavDrawer open={menuOpen} onOpenChange={onDismiss} />
 
       <AccountSwitcher
         open={accountsOpen}

@@ -14,6 +14,12 @@ interface SheetProps {
   /** Full height instead of the default content-sized sheet. */
   full?: boolean
   showClose?: boolean
+  /**
+   * Where it comes from. `bottom` is the sheet everything else uses; `left` is
+   * the navigation drawer, which stays a drawer at every width because only a
+   * phone ever opens it.
+   */
+  side?: 'bottom' | 'left'
 }
 
 /**
@@ -31,7 +37,9 @@ export function Sheet({
   className,
   full,
   showClose = true,
+  side = 'bottom',
 }: SheetProps) {
+  const drawer = side === 'left'
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -39,18 +47,26 @@ export function Sheet({
         <Dialog.Content
           className={cn(
             'fixed z-50 border-border bg-elevated text-text focus:outline-none',
-            // Mobile: bottom sheet.
-            'inset-x-0 bottom-0 rounded-t-3xl border-t animate-slide-up',
-            full ? 'top-0 rounded-t-none' : 'max-h-[85vh]',
-            // Desktop: centred dialog.
-            'sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[440px]',
-            'sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-card sm:border',
-            'sm:animate-fade-in sm:max-h-[85vh]',
+            drawer
+              ? // Left drawer, at every width: the page stays visible beside it.
+                [
+                  'inset-y-0 left-0 flex w-[86%] max-w-[320px] flex-col',
+                  'rounded-r-3xl border-r animate-slide-in-left',
+                ]
+              : [
+                  // Mobile: bottom sheet.
+                  'inset-x-0 bottom-0 rounded-t-3xl border-t animate-slide-up',
+                  full ? 'top-0 rounded-t-none' : 'max-h-[85vh]',
+                  // Desktop: centred dialog.
+                  'sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[440px]',
+                  'sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-card sm:border',
+                  'sm:animate-fade-in sm:max-h-[85vh]',
+                ],
             className,
           )}
         >
-          {/* Drag handle, mobile only. */}
-          {!full ? (
+          {/* Drag handle, bottom sheets only. */}
+          {!full && !drawer ? (
             <div className="flex justify-center pt-3 sm:hidden" aria-hidden>
               <div className="h-1 w-10 rounded-full bg-border" />
             </div>
@@ -77,7 +93,9 @@ export function Sheet({
             ) : null}
           </div>
 
-          <div className={cn('overflow-y-auto px-5 pb-6', full && 'flex-1')}>{children}</div>
+          <div className={cn('overflow-y-auto px-5 pb-6', (full || drawer) && 'flex-1')}>
+            {children}
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
