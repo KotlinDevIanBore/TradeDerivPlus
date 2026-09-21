@@ -5,19 +5,18 @@ import { useSessionStore } from '@/store/session'
 import { queryKeys } from '@/lib/queryKeys'
 import type { List, Signal } from '@/types'
 
+/** Everything currently listening for a signal push. */
+const listeners = new Set<(signal: Signal) => void>()
+
 /**
- * Listens for new signals app-wide. New signals are prepended into every cached
- * signal list, and returned here so the Signals screen can show its "new
- * signal" pill and the shell can raise a toast.
+ * The app's one signal socket, mounted by the shell and by nothing else. New
+ * signals are prepended into every cached signal list and handed to each
+ * listener, so the shell can raise a toast and the Signals screen can show its
+ * "new signal" pill from a single connection.
  */
-export function useSignalStream(onSignal?: (signal: Signal) => void) {
+export function useSignalFeed() {
   const token = useSessionStore((s) => s.accessToken)
   const queryClient = useQueryClient()
-  const [latest, setLatest] = useState<Signal | null>(null)
-
-  // Kept in a ref so a changing callback identity does not rebuild the socket.
-  const handlerRef = useRef(onSignal)
-  handlerRef.current = onSignal
 
   useEffect(() => {
     if (!token) return
@@ -29,8 +28,7 @@ export function useSignalStream(onSignal?: (signal: Signal) => void) {
         if (env.type !== 'signal') return
         const signal = env.payload as Signal
 
-        setLatest(signal)
-        handlerRef.current?.(signal)
+        for (const listener of [...listeners]) listener(signal)
 
         // Prepend into the "all symbols" list and this symbol's own list.
         // A refetch may already have picked this signal up, so drop any
@@ -50,6 +48,30 @@ export function useSignalStream(onSignal?: (signal: Signal) => void) {
 
     return () => socket.close()
   }, [token, queryClient])
+}
+
+/**
+ * Listens for new signals. Opens nothing: the connection belongs to the shell,
+ * so any number of screens can listen without multiplying sockets.
+ */
+export function useSignalStream(onSignal?: (signal: Signal) => void) {
+  const [latest, setLatest] = useState<Signal | null>(null)
+
+  // Kept in a ref so a changing callback identity does not re-register.
+  const handlerRef = useRef(onSignal)
+  handlerRef.current = onSignal
+
+  useEffect(() => {
+    const listener = (signal: Signal) => {
+      setLatest(signal)
+      handlerRef.current?.(signal)
+    }
+
+    listeners.add(listener)
+    return () => {
+      listeners.delete(listener)
+    }
+  }, [])
 
   return latest
 }

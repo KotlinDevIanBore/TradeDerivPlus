@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { toast } from '@/components/ui/Toast'
 import { PageHeader } from '@/features/shell/PageHeader'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
-import { usePriceStream } from '@/hooks/usePriceStream'
+import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import { useCloseTrade, useTradeSummary, useTrades } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { dayLabel, signedMoney } from '@/lib/format'
@@ -104,7 +104,7 @@ export function PortfolioScreen() {
     () => [...new Set((openTrades.data?.items ?? []).map((t) => t.symbol_code))],
     [openTrades.data],
   )
-  usePriceStream(symbols)
+  useWatchSymbols(symbols)
   useRelativeTime()
 
   // Group closed trades under sticky day headings.

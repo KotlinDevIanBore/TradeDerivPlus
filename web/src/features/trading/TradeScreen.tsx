@@ -12,7 +12,7 @@ import { Sheet } from '@/components/ui/Sheet'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { signalHref } from '@/features/signals/SignalCard'
-import { usePriceStream } from '@/hooks/usePriceStream'
+import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import {
   useCloseTrade,
   useOpenTrade,
@@ -74,7 +74,7 @@ export function TradeScreen() {
     for (const t of openTrades.data?.items ?? []) codes.add(t.symbol_code)
     return [...codes]
   }, [symbolCode, openTrades.data])
-  usePriceStream(streamed)
+  useWatchSymbols(streamed)
   useRelativeTime()
 
   const tick = usePrice(symbolCode)

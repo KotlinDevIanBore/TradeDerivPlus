@@ -12,7 +12,7 @@ import { AccountSwitcher } from '@/features/shell/AccountSwitcher'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
-import { usePriceStream } from '@/hooks/usePriceStream'
+import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import { useSignals, useTransactions, useTrades, useWallet } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { useSessionStore } from '@/store/session'
@@ -46,7 +46,7 @@ export function HomeScreen() {
     () => [...new Set((openTrades.data?.items ?? []).map((t) => t.symbol_code))],
     [openTrades.data],
   )
-  usePriceStream(symbols)
+  useWatchSymbols(symbols)
   useRelativeTime()
 
   const latestSignal = signals.data?.items?.[0]

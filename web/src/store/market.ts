@@ -11,10 +11,18 @@ interface MarketState {
   status: ConnectionStatus
   /** Epoch seconds of the last tick on any symbol, for the stale check. */
   lastTickAt: number
+  /**
+   * Which symbols the mounted screens need priced, counted rather than listed:
+   * two screens wanting the same symbol must both let go before it stops
+   * streaming. The socket that serves this set belongs to the shell.
+   */
+  watched: Record<string, number>
 
   pushTick: (tick: Tick) => void
   seedHistory: (symbol: string, ticks: Tick[]) => void
   setStatus: (status: ConnectionStatus) => void
+  watch: (symbols: string[]) => void
+  unwatch: (symbols: string[]) => void
   reset: () => void
 }
 
@@ -23,6 +31,7 @@ export const useMarketStore = create<MarketState>((set) => ({
   history: {},
   status: 'idle',
   lastTickAt: 0,
+  watched: {},
 
   pushTick: (tick) =>
     set((s) => {
@@ -49,7 +58,25 @@ export const useMarketStore = create<MarketState>((set) => ({
 
   setStatus: (status) => set({ status }),
 
-  reset: () => set({ prices: {}, history: {}, status: 'idle', lastTickAt: 0 }),
+  watch: (symbols) =>
+    set((s) => {
+      const watched = { ...s.watched }
+      for (const symbol of symbols) watched[symbol] = (watched[symbol] ?? 0) + 1
+      return { watched }
+    }),
+
+  unwatch: (symbols) =>
+    set((s) => {
+      const watched = { ...s.watched }
+      for (const symbol of symbols) {
+        const remaining = (watched[symbol] ?? 0) - 1
+        if (remaining > 0) watched[symbol] = remaining
+        else delete watched[symbol]
+      }
+      return { watched }
+    }),
+
+  reset: () => set({ prices: {}, history: {}, status: 'idle', lastTickAt: 0, watched: {} }),
 }))
 
 /**

@@ -105,12 +105,14 @@ export function createSocket(opts: SocketOptions): ReconnectingSocket {
         ws.send(JSON.stringify(data))
       }
     },
+    // Deliberately reports no status. A caller closing a socket knows why it
+    // did so and what the connection state now means; announcing `offline`
+    // from here made every teardown look like a dead market.
     close: () => {
       closed = true
       if (retryTimer) clearTimeout(retryTimer)
       ws?.close()
       ws = null
-      opts.onStatus('offline')
     },
   }
 }

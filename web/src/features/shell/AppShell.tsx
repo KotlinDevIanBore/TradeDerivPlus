@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/EmptyState'
 import { toast } from '@/components/ui/Toast'
 import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
-import { useSignalStream } from '@/hooks/useSignalStream'
+import { usePriceFeed } from '@/hooks/usePriceFeed'
+import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe } from '@/hooks/useQueries'
 import { money, signedMoney } from '@/lib/format'
 import { useIsAuthenticated } from '@/store/session'
@@ -27,6 +28,12 @@ export function AppShell() {
   const { account, accountId, accounts, isLoading, error, refetch } = useActiveAccount()
   const createAccount = useCreateAccount()
   useMe()
+
+  // The price and signal sockets live here, for the whole session. Screens say
+  // which symbols they need with useWatchSymbols; none of them owns a
+  // connection, so none of them can close one by unmounting.
+  usePriceFeed()
+  useSignalFeed()
 
   // A new signal raises a toast wherever the user is.
   useSignalStream((signal) => {
