@@ -12,7 +12,7 @@ import { price as fmtPrice } from '@/lib/format'
 import { dec } from '@/lib/money'
 import type { Tick } from '@/types'
 
-import type { ChartRange } from './chartRange'
+import { windowTicks, type ChartRange } from './chartRange'
 import { chartTheme } from './chartTheme'
 
 /**
@@ -39,12 +39,10 @@ export function PriceChart({
   stale?: boolean
   className?: string
 }) {
-  const data = useMemo(() => {
-    const cutoff = Date.now() / 1000 - range * 60
-    return ticks
-      .filter((t) => t.epoch >= cutoff)
-      .map((t) => ({ epoch: t.epoch, value: dec(t.price).toNumber() }))
-  }, [ticks, range])
+  const data = useMemo(
+    () => windowTicks(ticks, range).map((t) => ({ epoch: t.epoch, value: dec(t.price).toNumber() })),
+    [ticks, range],
+  )
 
   const rising = useMemo(() => {
     if (data.length < 2) return true

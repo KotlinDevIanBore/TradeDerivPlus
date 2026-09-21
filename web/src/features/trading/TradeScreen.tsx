@@ -21,12 +21,13 @@ import {
   useWallet,
 } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
-import { money, percent, relativeTime } from '@/lib/format'
+import { cn } from '@/lib/cn'
+import { money, percent, price as fmtPrice, relativeTime, signedPercent } from '@/lib/format'
 import { dec } from '@/lib/money'
 import { pnl } from '@/lib/pnl'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
 import { ChartRangeToggle } from './ChartRangeToggle'
-import type { ChartRange } from './chartRange'
+import { windowChange, type ChartRange, type WindowChange } from './chartRange'
 import { PriceChartLazy } from './PriceChartLazy'
 import { OrderTicket, type TicketValues } from './OrderTicket'
 import { SymbolPicker } from './SymbolPicker'
@@ -72,6 +73,10 @@ export function TradeScreen() {
   const history = useTickHistory(symbolCode)
   const status = useConnectionStatus()
   const stale = status === 'reconnecting' || status === 'offline'
+
+  // Movement across the window the chart is drawing, not a daily change: the
+  // server keeps a short rolling tick buffer, so there is no daily open price.
+  const change = useMemo(() => windowChange(history, range), [history, range])
 
   // After five seconds with no tick, say so rather than spinning forever.
   useEffect(() => {
@@ -154,12 +159,20 @@ export function TradeScreen() {
 
         <div className="px-gutter lg:px-0">
           <div className="flex items-end justify-between gap-3">
-            <PriceTag
-              value={tick?.price}
-              pipSize={symbol?.pip_size ?? 4}
-              stale={stale}
-              className="text-title font-bold"
-            />
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <PriceTag
+                value={tick?.price}
+                pipSize={symbol?.pip_size ?? 4}
+                stale={stale}
+                className="text-title font-bold"
+              />
+              <WindowChangeTag
+                change={change}
+                pipSize={symbol?.pip_size ?? 4}
+                range={range}
+                stale={stale}
+              />
+            </div>
             <ChartRangeToggle range={range} onChange={setRange} />
           </div>
         </div>
@@ -310,5 +323,38 @@ export function TradeScreen() {
         ) : null}
       </Sheet>
     </div>
+  )
+}
+
+/**
+ * Price movement across the visible chart window. The window is named in the
+ * label because this is not a daily change and must not be read as one; the
+ * sign carries the direction, so colour is never the only signal.
+ */
+function WindowChangeTag({
+  change,
+  pipSize,
+  range,
+  stale,
+}: {
+  change: WindowChange | null
+  pipSize: number
+  range: ChartRange
+  stale: boolean
+}) {
+  if (!change) return null
+
+  const flat = change.percent.isZero()
+  const down = change.percent.isNegative()
+  // fmtPrice carries its own minus sign, so only a rise needs one added.
+  const absolute = (down ? '' : '+') + fmtPrice(change.absolute.toString(), pipSize)
+
+  return (
+    <span className={cn('flex items-baseline gap-1.5 text-meta tnum', stale && 'opacity-50')}>
+      <span className={flat ? 'text-muted' : down ? 'text-loss' : 'text-profit'}>
+        {absolute} ({signedPercent(change.percent.toString(), 2)})
+      </span>
+      <span className="text-faint">past {range}m</span>
+    </span>
   )
 }
