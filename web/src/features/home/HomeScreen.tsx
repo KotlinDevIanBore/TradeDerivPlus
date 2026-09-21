@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { ErrorState } from '@/components/ErrorState'
@@ -8,9 +8,7 @@ import {
   SignalCardEmpty,
   SignalCardSkeleton,
 } from '@/features/signals/SignalCard'
-import { AccountSwitcher } from '@/features/shell/AccountSwitcher'
-import { DepositSheet } from '@/features/wallet/DepositSheet'
-import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
+import { overlay } from '@/features/shell/overlays'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import { useSignals, useTransactions, useTrades, useWallet } from '@/hooks/useQueries'
@@ -32,10 +30,6 @@ export function HomeScreen() {
   const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
   const user = useSessionStore((s) => s.user)
 
-  const [depositOpen, setDepositOpen] = useState(false)
-  const [switcherOpen, setSwitcherOpen] = useState(false)
-  const [withdrawOpen, setWithdrawOpen] = useState(false)
-
   const wallet = useWallet(accountId)
   const signals = useSignals(undefined, 1)
   const openTrades = useTrades(accountId, 'open', 3)
@@ -50,7 +44,6 @@ export function HomeScreen() {
   useRelativeTime()
 
   const latestSignal = signals.data?.items?.[0]
-  const realAccount = accounts.find((a) => a.account_type === 'real') ?? null
   const canWithdraw = user?.kyc_status === 'verified'
 
   return (
@@ -62,8 +55,8 @@ export function HomeScreen() {
           isLoading={wallet.isLoading}
           isError={wallet.isError}
           onRetry={() => wallet.refetch()}
-          onDeposit={() => setDepositOpen(true)}
-          onWithdraw={() => setWithdrawOpen(true)}
+          onDeposit={overlay.deposit}
+          onWithdraw={overlay.withdraw}
           canWithdraw={canWithdraw}
           withdrawHint="Verify your identity to withdraw"
         />
@@ -72,7 +65,7 @@ export function HomeScreen() {
           accounts={accounts}
           activeAccountId={accountId}
           onSelect={setActiveAccount}
-          onCreate={() => setSwitcherOpen(true)}
+          onCreate={overlay.accounts}
         />
 
         <section aria-label="Latest signal">
@@ -123,36 +116,10 @@ export function HomeScreen() {
         ) : (
           <RecentActivity
             transactions={transactions.data?.items ?? []}
-            onDeposit={() => setDepositOpen(true)}
+            onDeposit={overlay.deposit}
           />
         )}
       </div>
-
-      <AccountSwitcher
-        open={switcherOpen}
-        onOpenChange={setSwitcherOpen}
-        accounts={accounts}
-        activeAccountId={accountId}
-        isLoading={false}
-      />
-
-      <DepositSheet
-        open={depositOpen}
-        onOpenChange={setDepositOpen}
-        account={account}
-        realAccount={realAccount}
-        onSwitchToReal={() => {
-          if (realAccount) setActiveAccount(realAccount.id)
-          setDepositOpen(false)
-        }}
-      />
-
-      <WithdrawSheet
-        open={withdrawOpen}
-        onOpenChange={setWithdrawOpen}
-        account={account}
-        wallet={wallet.data}
-      />
     </div>
   )
 }

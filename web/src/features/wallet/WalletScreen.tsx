@@ -5,6 +5,7 @@ import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { BalanceCard } from '@/features/home/BalanceCard'
+import { overlay } from '@/features/shell/overlays'
 import { PageHeader } from '@/features/shell/PageHeader'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useTransactions, useWallet } from '@/hooks/useQueries'
@@ -12,10 +13,8 @@ import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { cn } from '@/lib/cn'
 import { useSessionStore } from '@/store/session'
 import type { Transaction, TxType } from '@/types'
-import { DepositSheet } from './DepositSheet'
 import { TransactionDetail } from './TransactionDetail'
 import { TransactionRow } from './TransactionRow'
-import { WithdrawSheet } from './WithdrawSheet'
 
 const FILTERS: { label: string; types?: TxType[] }[] = [
   { label: 'All' },
@@ -25,13 +24,10 @@ const FILTERS: { label: string; types?: TxType[] }[] = [
 ]
 
 export function WalletScreen() {
-  const { account, accountId, accounts, isDemo } = useActiveAccount()
-  const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
+  const { account, accountId, isDemo } = useActiveAccount()
   const user = useSessionStore((s) => s.user)
 
   const [filterIndex, setFilterIndex] = useState(0)
-  const [depositOpen, setDepositOpen] = useState(false)
-  const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [detail, setDetail] = useState<Transaction | null>(null)
 
   const wallet = useWallet(accountId)
@@ -39,7 +35,6 @@ export function WalletScreen() {
   const transactions = useTransactions(accountId, filter.types, 50)
   useRelativeTime()
 
-  const realAccount = accounts.find((a) => a.account_type === 'real') ?? null
   const canWithdraw = user?.kyc_status === 'verified'
 
   // Pending deposits are pinned to the top: they are what a user comes back for.
@@ -62,8 +57,8 @@ export function WalletScreen() {
           isLoading={wallet.isLoading}
           isError={wallet.isError}
           onRetry={() => wallet.refetch()}
-          onDeposit={() => setDepositOpen(true)}
-          onWithdraw={() => setWithdrawOpen(true)}
+          onDeposit={overlay.deposit}
+          onWithdraw={overlay.withdraw}
           canWithdraw={canWithdraw}
           withdrawHint="Verify your identity to withdraw"
         />
@@ -103,7 +98,7 @@ export function WalletScreen() {
             hint={filterIndex === 0 ? 'Fund your account to start trading.' : undefined}
             action={
               filterIndex === 0 && !isDemo ? (
-                <Button variant="outline" size="sm" onClick={() => setDepositOpen(true)}>
+                <Button variant="outline" size="sm" onClick={overlay.deposit}>
                   Deposit
                 </Button>
               ) : undefined
@@ -124,24 +119,6 @@ export function WalletScreen() {
           </ul>
         )}
       </section>
-
-      <DepositSheet
-        open={depositOpen}
-        onOpenChange={setDepositOpen}
-        account={account}
-        realAccount={realAccount}
-        onSwitchToReal={() => {
-          if (realAccount) setActiveAccount(realAccount.id)
-          setDepositOpen(false)
-        }}
-      />
-
-      <WithdrawSheet
-        open={withdrawOpen}
-        onOpenChange={setWithdrawOpen}
-        account={account}
-        wallet={wallet.data}
-      />
 
       <TransactionDetail transaction={detail} onClose={() => setDetail(null)} />
     </div>
