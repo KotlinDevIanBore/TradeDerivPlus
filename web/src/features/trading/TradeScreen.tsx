@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
+import { usePanel } from '@/features/shell/usePanel'
 import { signalHref } from '@/features/signals/SignalCard'
 import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import {
@@ -45,6 +46,7 @@ const CONFIRM_THRESHOLD = 0.2
 export function TradeScreen() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
+  const { open: openPanel } = usePanel()
   const { accountId, isDemo } = useActiveAccount()
 
   const symbolsQuery = useSymbols()
@@ -149,7 +151,9 @@ export function TradeScreen() {
       },
       {
         onSuccess: () => {
-          toast.action('Position opened', 'View in Portfolio', () => navigate('/portfolio'), 'success')
+          // Positions is a panel over this screen now, so the offer is to open
+          // it rather than to go somewhere.
+          toast.action('Position opened', 'View positions', () => openPanel('positions'), 'success')
         },
       },
     )
