@@ -7,6 +7,7 @@ import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/ho
 import { usePriceFeed } from '@/hooks/usePriceFeed'
 import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
+import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
@@ -17,6 +18,7 @@ import { overlay, useOverlayOpen } from './overlays'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
+import { MAIN_SURFACE } from './usePanel'
 
 /**
  * The persistent frame around every authenticated screen. It owns account
@@ -39,6 +41,8 @@ export function AppShell() {
   const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
 
   const menuOpen = useOverlayOpen('menu')
+  const onMainSurface = location.pathname === MAIN_SURFACE
+
   const accountsOpen = useOverlayOpen('accounts')
   const depositOpen = useOverlayOpen('deposit')
   const withdrawOpen = useOverlayOpen('withdraw')
@@ -136,8 +140,18 @@ export function AppShell() {
         </div>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1200px] flex-1">
-        <main className="min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8">
+      <div className="flex w-full flex-1">
+        <main
+          className={cn(
+            'min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8',
+            // The trading surface takes the whole window: a chart inside a
+            // 1200px reading width is a widget, and the panel arriving beside
+            // it would make that worse. The screens that have not become
+            // panels yet keep the cap they were laid out for, and stop needing
+            // it when they dissolve.
+            !onMainSurface && 'mx-auto w-full max-w-[1200px]',
+          )}
+        >
           <Outlet />
         </main>
       </div>
