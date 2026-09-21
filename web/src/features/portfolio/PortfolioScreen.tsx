@@ -16,6 +16,7 @@ import { useCloseTrade, useTradeSummary, useTrades } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { dayLabel, signedMoney } from '@/lib/format'
 import { pnl } from '@/lib/pnl'
+import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice } from '@/store/market'
 import type { Trade } from '@/types'
 import { ClosedTradeRow, PositionCard } from './PositionCard'
@@ -172,7 +173,10 @@ export function PortfolioScreen() {
         )}
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setParams(mergeParams({ tab: v }), { replace: true })}
+      >
         <TabsList className="px-gutter lg:px-6">
           <TabsTrigger value="open">Open</TabsTrigger>
           <TabsTrigger value="closed">Closed</TabsTrigger>

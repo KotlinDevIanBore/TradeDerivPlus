@@ -27,6 +27,7 @@ import { cn } from '@/lib/cn'
 import { money, percent, price as fmtPrice, relativeTime, signedPercent } from '@/lib/format'
 import { dec } from '@/lib/money'
 import { pnl } from '@/lib/pnl'
+import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
 import { ChartRangeToggle } from './ChartRangeToggle'
 import { windowChange, type ChartRange, type WindowChange } from './chartRange'
@@ -111,8 +112,12 @@ export function TradeScreen() {
   const expiredSignal = params.get('expired') === '1'
 
   const selectSymbol = (code: string) => {
-    // Changing symbol drops any signal prefill; those levels were for the old one.
-    setParams({ symbol: code }, { replace: true })
+    // Changing symbol drops any signal prefill; those levels were for the old
+    // one. Anything else on the URL belongs to somebody else and is kept.
+    setParams(
+      mergeParams({ symbol: code, direction: null, sl: null, tp: null, expired: null }),
+      { replace: true },
+    )
   }
 
   const submit = (values: TicketValues) => {
