@@ -130,9 +130,12 @@ export function TopBar({
         <div className="flex shrink-0 items-center gap-2 lg:gap-3">
           <ConnectionDot hideWhenIdle />
 
+          {/* The word fits from 400px up, measured with a five-figure balance
+              in the pill beside it. Below that the icon carries it, and the
+              label stays on the button for anyone who cannot see either. */}
           <Button size="sm" onClick={onDeposit} aria-label="Deposit">
-            <ArrowDownToLine className="h-4 w-4 sm:hidden" aria-hidden />
-            <span className="hidden sm:inline">Deposit</span>
+            <ArrowDownToLine className="h-4 w-4 min-[400px]:hidden" aria-hidden />
+            <span className="hidden min-[400px]:inline">Deposit</span>
           </Button>
 
           <Link
