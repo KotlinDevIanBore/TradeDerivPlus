@@ -82,9 +82,14 @@ export function SymbolPicker({
           <>
             <span className="text-body font-semibold">{selected?.display_name ?? 'Pick a symbol'}</span>
             {selected ? (
-              <span className="rounded bg-elevated px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted">
-                {selected.category.replace('_', ' ')}
-              </span>
+              <>
+                {/* The code is what the order button and the positions list name
+                    a position by, so it belongs in the header too. */}
+                <span className="text-meta text-muted tnum">{selected.code}</span>
+                <span className="rounded bg-elevated px-1.5 py-0.5 text-nano uppercase tracking-wider text-muted">
+                  {selected.category.replace('_', ' ')}
+                </span>
+              </>
             ) : null}
           </>
         )}

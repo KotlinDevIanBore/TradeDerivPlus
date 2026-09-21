@@ -21,7 +21,7 @@ export function AccountPill({
     <span className={cn('inline-flex items-center gap-1.5', className)}>
       <span
         className={cn(
-          'rounded-pill border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+          'rounded-pill border px-2 py-0.5 text-nano font-bold uppercase tracking-wider',
           isDemo ? 'border-demo/50 text-demo' : 'border-real/50 text-real',
         )}
       >

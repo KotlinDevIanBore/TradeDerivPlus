@@ -82,7 +82,7 @@ export function PositionCard({
           <ArrowRight className="h-3 w-3 text-faint" aria-hidden />
           <PriceTag value={tick?.price} pipSize={trade.pip_size} stale={priceStale} className="text-muted" />
           {priceStale ? (
-            <span className="rounded bg-elevated px-1.5 py-0.5 text-[10px] uppercase text-warning">
+            <span className="rounded bg-elevated px-1.5 py-0.5 text-nano uppercase text-warning">
               stale
             </span>
           ) : null}

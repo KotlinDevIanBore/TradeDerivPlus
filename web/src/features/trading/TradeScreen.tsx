@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { LineChart } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { ConnectionDot } from '@/components/ConnectionDot'
 import { DirectionBadge } from '@/components/DirectionBadge'
+import { EmptyState } from '@/components/EmptyState'
 import { Money } from '@/components/Money'
 import { PriceTag } from '@/components/PriceTag'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
-import { Skeleton } from '@/components/ui/Skeleton'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { signalHref } from '@/features/signals/SignalCard'
@@ -17,18 +18,23 @@ import {
   useOpenTrade,
   useSignals,
   useSymbols,
+  useTradeSummary,
   useTrades,
   useWallet,
 } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
-import { money, percent, relativeTime } from '@/lib/format'
+import { cn } from '@/lib/cn'
+import { money, percent, price as fmtPrice, relativeTime, signedPercent } from '@/lib/format'
 import { dec } from '@/lib/money'
 import { pnl } from '@/lib/pnl'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
 import { ChartRangeToggle } from './ChartRangeToggle'
-import type { ChartRange } from './chartRange'
+import { windowChange, type ChartRange, type WindowChange } from './chartRange'
+import { ChartSkeleton } from './ChartSkeleton'
 import { PriceChartLazy } from './PriceChartLazy'
 import { OrderTicket, type TicketValues } from './OrderTicket'
+import { SessionStrip } from './SessionStrip'
+import { sessionStats } from './sessionStats'
 import { SymbolPicker } from './SymbolPicker'
 
 const DEFAULT_SYMBOL = 'R_75'
@@ -43,6 +49,9 @@ export function TradeScreen() {
   const symbolsQuery = useSymbols()
   const wallet = useWallet(accountId)
   const openTrades = useTrades(accountId, 'open', 50)
+  const summary = useTradeSummary(accountId)
+  // Same query key Portfolio uses, so the two screens share one fetch.
+  const closedTrades = useTrades(accountId, 'closed', 50)
   const openTrade = useOpenTrade()
   const closeTrade = useCloseTrade()
 
@@ -72,6 +81,15 @@ export function TradeScreen() {
   const history = useTickHistory(symbolCode)
   const status = useConnectionStatus()
   const stale = status === 'reconnecting' || status === 'offline'
+
+  // Movement across the window the chart is drawing, not a daily change: the
+  // server keeps a short rolling tick buffer, so there is no daily open price.
+  const change = useMemo(() => windowChange(history, range), [history, range])
+
+  const session = useMemo(
+    () => sessionStats(closedTrades.data?.items ?? []),
+    [closedTrades.data],
+  )
 
   // After five seconds with no tick, say so rather than spinning forever.
   useEffect(() => {
@@ -154,35 +172,46 @@ export function TradeScreen() {
 
         <div className="px-gutter lg:px-0">
           <div className="flex items-end justify-between gap-3">
-            <PriceTag
-              value={tick?.price}
-              pipSize={symbol?.pip_size ?? 4}
-              stale={stale}
-              className="text-title font-bold"
-            />
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <PriceTag
+                value={tick?.price}
+                pipSize={symbol?.pip_size ?? 4}
+                stale={stale}
+                className="text-title font-bold"
+              />
+              <WindowChangeTag
+                change={change}
+                pipSize={symbol?.pip_size ?? 4}
+                range={range}
+                stale={stale}
+              />
+            </div>
             <ChartRangeToggle range={range} onChange={setRange} />
           </div>
         </div>
 
         <div className="relative mt-2">
           {history.length === 0 ? (
-            <div className="flex h-[240px] items-center justify-center lg:h-[340px]">
-              {waitedForPrice ? (
-                <div className="text-center">
-                  <p className="text-body text-muted">No price data for this symbol yet</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => window.location.reload()}
-                  >
-                    Try again
-                  </Button>
-                </div>
-              ) : (
-                <Skeleton className="h-full w-full rounded-none" />
-              )}
-            </div>
+            waitedForPrice ? (
+              <div className="flex h-[240px] items-center justify-center lg:h-[340px]">
+                <EmptyState
+                  icon={LineChart}
+                  title="No price data yet"
+                  hint={
+                    symbol
+                      ? `Nothing has arrived for ${symbol.code} yet. The chart draws itself as soon as the feed sends a tick.`
+                      : 'The chart draws itself as soon as the feed sends a tick.'
+                  }
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                      Try again
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <ChartSkeleton />
+            )
           ) : (
             <PriceChartLazy
               ticks={history}
@@ -216,6 +245,15 @@ export function TradeScreen() {
             <span className="ml-auto text-meta font-semibold text-accent">Apply</span>
           </button>
         ) : null}
+
+        <div className="mt-3 px-gutter lg:px-0">
+          <SessionStrip
+            summary={summary.data}
+            session={session}
+            isLoading={summary.isLoading}
+            stale={stale}
+          />
+        </div>
 
         {symbolTrades.length > 0 ? (
           <section className="mt-4 px-gutter lg:px-0" aria-label="Open positions on this symbol">
@@ -310,5 +348,38 @@ export function TradeScreen() {
         ) : null}
       </Sheet>
     </div>
+  )
+}
+
+/**
+ * Price movement across the visible chart window. The window is named in the
+ * label because this is not a daily change and must not be read as one; the
+ * sign carries the direction, so colour is never the only signal.
+ */
+function WindowChangeTag({
+  change,
+  pipSize,
+  range,
+  stale,
+}: {
+  change: WindowChange | null
+  pipSize: number
+  range: ChartRange
+  stale: boolean
+}) {
+  if (!change) return null
+
+  const flat = change.percent.isZero()
+  const down = change.percent.isNegative()
+  // fmtPrice carries its own minus sign, so only a rise needs one added.
+  const absolute = (down ? '' : '+') + fmtPrice(change.absolute.toString(), pipSize)
+
+  return (
+    <span className={cn('flex items-baseline gap-1.5 text-meta tnum', stale && 'opacity-50')}>
+      <span className={flat ? 'text-muted' : down ? 'text-loss' : 'text-profit'}>
+        {absolute} ({signedPercent(change.percent.toString(), 2)})
+      </span>
+      <span className="text-faint">past {range}m</span>
+    </span>
   )
 }

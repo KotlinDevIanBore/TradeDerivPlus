@@ -84,7 +84,7 @@ export function SignalCard({
         <span className="text-meta text-muted">
           {expired ? 'Expired' : `Updated ${relativeTime(signal.created_at)}`}
         </span>
-        <span className="rounded-md bg-elevated px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted">
+        <span className="rounded-md bg-elevated px-1.5 py-0.5 text-nano font-medium uppercase tracking-wider text-muted">
           {signal.strategy.replace('_', '+')}
         </span>
       </div>

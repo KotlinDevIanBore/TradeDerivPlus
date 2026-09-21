@@ -1,13 +1,13 @@
 import { useEffect, useId, useMemo, useState } from 'react'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Plus } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { humanMessage } from '@/components/ErrorState'
 import { cn } from '@/lib/cn'
-import { money, price as fmtPrice } from '@/lib/format'
+import { money, price as fmtPrice, signedMoney } from '@/lib/format'
 import { dec } from '@/lib/money'
-import { validateStopLoss, validateTakeProfit } from '@/lib/pnl'
+import { pnl, validateStopLoss, validateTakeProfit } from '@/lib/pnl'
 import type { Direction, TradeSymbol, Wallet } from '@/types'
 
 const QUICK_STAKES = [5, 10, 50]
@@ -113,11 +113,36 @@ export function OrderTicket({
         ? error.message
         : undefined
 
-  const distance = (level: string): string | undefined => {
+  /**
+   * How far a level sits from the live price, and what reaching it is worth at
+   * the current stake. The money figure comes from the same pnl() the server
+   * mirrors on close, so the preview cannot drift from the settled result.
+   */
+  const levelHint = (level: string): string | undefined => {
     if (!entry || !level || entry.isZero()) return undefined
+
     const pct = dec(level).minus(entry).dividedBy(entry).times(100)
-    return `${pct.isNegative() ? '' : '+'}${pct.toFixed(2)}% from price`
+    // "away" rather than "from price", so the projection below fits one line in
+    // the ticket's two-column grid.
+    const distance = `${pct.isNegative() ? '' : '+'}${pct.toFixed(2)}% away`
+    if (stakeValue.lessThanOrEqualTo(0)) return `${distance} from price`
+
+    const projected = pnl(direction, entry, dec(level), stakeValue)
+    return `${distance} · ${signedMoney(projected.toString())} if hit`
   }
+
+  /**
+   * What a 1% move in the user's favour pays at this stake. This product has no
+   * fixed payout -- profit scales with the move -- so this is the honest
+   * equivalent, and it is the fastest way to see that a $10 stake is $0.10 a
+   * percent. Derived through pnl() rather than divided by a hundred, so it
+   * follows the model if the model ever changes.
+   */
+  const perPercentMove = useMemo(() => {
+    if (!entry || entry.isZero() || stakeValue.lessThanOrEqualTo(0)) return null
+    const favourable = direction === 'sell' ? entry.times(0.99) : entry.times(1.01)
+    return pnl(direction, entry, favourable, stakeValue)
+  }, [entry, direction, stakeValue])
 
   const canSubmit =
     !disabled && !stakeError && !slError && !tpError && stake !== '' && stakeValue.greaterThan(0)
@@ -181,6 +206,13 @@ export function OrderTicket({
             Max
           </button>
         </div>
+
+        {perPercentMove ? (
+          <p className="mt-2 text-meta text-faint">
+            A 1% move your way is worth{' '}
+            <span className="tnum text-muted">{money(perPercentMove.toString())}</span>
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-3">
@@ -194,7 +226,7 @@ export function OrderTicket({
           value={stopLoss}
           onChange={setStopLoss}
           error={slError}
-          hint={slEnabled && stopLoss ? distance(stopLoss) : undefined}
+          hint={slEnabled && stopLoss ? levelHint(stopLoss) : undefined}
           placeholder={entry && symbol ? fmtPrice(entry.toString(), symbol.pip_size) : ''}
         />
         <LevelField
@@ -207,7 +239,7 @@ export function OrderTicket({
           value={takeProfit}
           onChange={setTakeProfit}
           error={tpError}
-          hint={tpEnabled && takeProfit ? distance(takeProfit) : undefined}
+          hint={tpEnabled && takeProfit ? levelHint(takeProfit) : undefined}
           placeholder={entry && symbol ? fmtPrice(entry.toString(), symbol.pip_size) : ''}
         />
       </div>
@@ -278,8 +310,8 @@ function LevelField({
           aria-pressed={enabled}
           aria-label={`${enabled ? 'Remove' : 'Set'} ${label.toLowerCase()}`}
           className={cn(
-            'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors',
-            enabled ? 'bg-accent-subtle text-accent' : 'bg-elevated text-faint',
+            'rounded px-1.5 py-0.5 text-nano font-semibold uppercase tracking-wider transition-colors',
+            enabled ? 'bg-accent-subtle text-accent' : 'bg-elevated text-muted hover:text-text',
           )}
         >
           {enabled ? 'On' : 'Off'}
@@ -298,12 +330,23 @@ function LevelField({
           hint={hint}
         />
       ) : (
-        <div
+        // Off is a level not yet set, not a feature switched off, so it reads as
+        // a control waiting to be used: a solid border and a plus, not a dashed
+        // grey box. One tap away, in the ticket, with no navigation.
+        <button
+          type="button"
           id={fieldId}
-          className="flex h-11 items-center rounded-xl border border-dashed border-border px-3 text-body text-faint"
+          onClick={onToggle}
+          className={cn(
+            'flex h-11 w-full items-center gap-1.5 rounded-xl border border-border bg-elevated/40 px-3',
+            'text-body text-muted transition-colors hover:border-accent hover:text-text',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            'focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
+          )}
         >
-          Not set
-        </div>
+          <Plus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          Set a level
+        </button>
       )}
     </div>
   )
