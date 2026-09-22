@@ -82,6 +82,13 @@ func (r *TransactionRepo) QueryFundingBalance(ctx context.Context, reference str
 		reference).Scan(out))
 }
 
+// QueryDigitFundingBalance is the digit-contract equivalent of QueryFundingBalance.
+func (r *TransactionRepo) QueryDigitFundingBalance(ctx context.Context, reference string, out *string) error {
+	return mapErr(r.db.QueryRow(ctx,
+		`SELECT balance_type FROM transactions WHERE reference = $1 AND type = 'digit_open' LIMIT 1`,
+		reference).Scan(out))
+}
+
 // AdminTransaction is a ledger row with the owning account and user attached,
 // so the admin table renders without a join client-side.
 type AdminTransaction struct {
