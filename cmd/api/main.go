@@ -89,6 +89,7 @@ func run() error {
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, hub, cfg, log)
 	trading := service.NewTradingService(store, feed, hub, log)
+	digits := service.NewDigitService(store, feed, hub, log)
 	signals := service.NewSignalService(store, feed, hub, cfg, log)
 	admin := service.NewAdminService(store, hub, cfg, log)
 	admin.SetConnectionCounter(hub)
@@ -102,6 +103,7 @@ func run() error {
 
 	go feed.Run(ctx)
 	trading.Start(ctx)
+	digits.Start(ctx)
 	go signals.Run(ctx)
 
 	// Refresh the gauges, including the ledger drift number that says whether
@@ -114,6 +116,7 @@ func run() error {
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
 	deps.Handler.Trade = handlers.NewTradeHandler(trading)
+	deps.Handler.Digit = handlers.NewDigitHandler(digits)
 	deps.Handler.Market = handlers.NewMarketHandler(store, feed, signals)
 	deps.Handler.WS = handlers.NewWSHandler(hub, feed, wallet, cfg.CORSOrigins, log)
 	deps.Handler.Admin = handlers.NewAdminHandler(admin, cfg)

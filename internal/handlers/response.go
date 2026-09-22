@@ -62,6 +62,8 @@ func fail(c *gin.Context, err error) {
 		respondErr(c, http.StatusBadRequest, err.Error(), "market_closed", "")
 	case errors.Is(err, service.ErrTradeNotOpen):
 		respondErr(c, http.StatusConflict, err.Error(), "trade_not_open", "")
+	case errors.Is(err, service.ErrDigitNotOpen):
+		respondErr(c, http.StatusConflict, err.Error(), "digit_not_open", "")
 	case errors.Is(err, service.ErrAccountFrozen):
 		respondErr(c, http.StatusForbidden, err.Error(), "account_frozen", "")
 	case errors.Is(err, service.ErrAdminExists):

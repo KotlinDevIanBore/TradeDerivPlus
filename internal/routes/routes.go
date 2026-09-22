@@ -29,6 +29,7 @@ type Deps struct {
 		Account *handlers.AccountHandler
 		Wallet  *handlers.WalletHandler
 		Trade   *handlers.TradeHandler
+		Digit   *handlers.DigitHandler
 		Market  *handlers.MarketHandler
 		WS      *handlers.WSHandler
 		Admin   *handlers.AdminHandler
@@ -99,6 +100,11 @@ func New(d Deps) *gin.Engine {
 		protected.GET("/trades/summary", d.Handler.Trade.Summary)
 		protected.POST("/trades", d.Handler.Trade.Open)
 		protected.POST("/trades/:id/close", d.Handler.Trade.Close)
+
+		protected.GET("/digit-contracts", d.Handler.Digit.List)
+		protected.GET("/digit-contracts/summary", d.Handler.Digit.Summary)
+		protected.GET("/digit-contracts/:id", d.Handler.Digit.Get)
+		protected.POST("/digit-contracts", d.Handler.Digit.Open)
 	}
 
 	// Admin console. A separate login surface, a separate token scope, and a
