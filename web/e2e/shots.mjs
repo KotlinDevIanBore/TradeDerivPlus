@@ -1,6 +1,6 @@
 // Screenshot runner for the implementation reports. Not a test -- Playwright
 // only collects *.spec.ts, so this never runs with the suite.
-// Usage: node e2e/shots.mjs <out-dir> [--drawer] [--panels=a,b] [--trade-only]
+// Usage: node e2e/shots.mjs <out-dir> [--drawer] [--panels=a,b] [--position]
 import { chromium, devices } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 
@@ -26,7 +26,7 @@ async function register(page) {
   // No baseURL in a standalone script, so wait on the landing content rather
   // than a glob that would be resolved against one.
   await page.getByRole('button', { name: 'Create account' }).click()
-  await page.locator('section[aria-label="Balance"]').waitFor({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Switch account' }).waitFor({ timeout: 30_000 })
 }
 
 const browser = await chromium.launch()
@@ -43,12 +43,7 @@ for (const [name, opts] of viewports) {
   const page = await context.newPage()
   await register(page)
 
-  if (!flag('trade-only')) {
-    await page.waitForTimeout(1500)
-    await page.screenshot({ path: `${out}/${name}-home.png` })
-  }
-
-  await page.goto('http://localhost:5173/trade?panel=none')
+  await page.goto('http://localhost:5173/?panel=none')
   await page.waitForTimeout(4000)
 
   if (flag('position')) {
@@ -63,12 +58,17 @@ for (const [name, opts] of viewports) {
   await page.screenshot({ path: `${out}/${name}-trade.png` })
 
   for (const panel of list('panels')) {
-    await page.goto(`http://localhost:5173/trade?panel=${panel}`)
+    await page.goto(`http://localhost:5173/?panel=${panel}`)
     await page.waitForTimeout(3000)
     await page.screenshot({ path: `${out}/${name}-${panel}.png` })
   }
 
   if (flag('drawer') && name !== 'desktop') {
+    // Back to the bare surface first: a panel on a phone is a modal, and the
+    // bar behind it is out of the accessibility tree while it is open.
+    await page.goto('http://localhost:5173/?panel=none')
+    await page.waitForTimeout(1500)
+
     const menu = page.getByRole('button', { name: 'Open menu' })
     if (await menu.count()) {
       await menu.click()

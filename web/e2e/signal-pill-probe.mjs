@@ -20,9 +20,9 @@ for (const [label, ctx] of [
   await page.getByLabel('Confirm password').fill('hunter2024')
   await page.getByRole('checkbox').check()
   await page.getByRole('button', { name: 'Create account' }).click()
-  await page.locator('section[aria-label="Balance"]').waitFor({ timeout: 30_000 })
+  await page.getByRole('button', { name: 'Switch account' }).waitFor({ timeout: 30_000 })
 
-  await page.goto(`${BASE}/trade?panel=signals`)
+  await page.goto(`${BASE}/?panel=signals`)
   const panel = page
     .getByRole('complementary', { name: 'Signals' })
     .or(page.getByRole('dialog', { name: 'Signals' }))
