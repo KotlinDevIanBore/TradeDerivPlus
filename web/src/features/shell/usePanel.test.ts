@@ -18,6 +18,11 @@ describe('resolvePanel', () => {
     expect(resolvePanel('positions', phone)).toBe('positions')
   })
 
+  it('opens a panel that is not the default, which is why they have names', () => {
+    expect(resolvePanel('history', desktop)).toBe('history')
+    expect(resolvePanel('history', phone)).toBe('history')
+  })
+
   it('treats the closed sentinel as closed, which is what it is for', () => {
     expect(resolvePanel('none', desktop)).toBe(null)
   })

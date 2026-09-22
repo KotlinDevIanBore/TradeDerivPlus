@@ -1,22 +1,8 @@
-import { createContext, useContext, useState } from 'react'
+import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
+import { PanelScrollContext } from './panelScroll'
 import { Sheet } from './Sheet'
-
-const PanelScroll = createContext<HTMLElement | null>(null)
-
-/**
- * The element a panel scrolls inside, for content that needs to know where
- * scrolling happens rather than merely that it does.
- *
- * A panel scrolls itself, so `window.scrollY` is zero however far down its
- * content the user is. Anything watching the window from inside a panel is
- * watching the wrong thing. Returns null until the panel has mounted, and for
- * content rendered outside a panel.
- */
-export function usePanelScroll() {
-  return useContext(PanelScroll)
-}
 
 /**
  * A panel of content beside the main surface.
@@ -48,7 +34,7 @@ export function Panel({
   // arriving has to be a render of its own.
   const [scroller, setScroller] = useState<HTMLElement | null>(null)
 
-  const body = <PanelScroll.Provider value={scroller}>{children}</PanelScroll.Provider>
+  const body = <PanelScrollContext.Provider value={scroller}>{children}</PanelScrollContext.Provider>
 
   if (desktop) {
     if (!open) return null

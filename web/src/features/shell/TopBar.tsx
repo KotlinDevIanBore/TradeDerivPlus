@@ -18,25 +18,28 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/cn'
 import type { Account, Wallet } from '@/types'
-import { MAIN_SURFACE, usePanel } from './usePanel'
+import { MAIN_SURFACE, usePanel, type PanelName } from './usePanel'
 
-interface NavItem {
-  to: string
-  label: string
-  icon: LucideIcon
-}
+/**
+ * A row item is either somewhere to go or a panel to toggle, and the two are
+ * different enough to be different elements: a panel opens beside what you are
+ * looking at, so it is a button that says pressed, not a link that says page.
+ */
+type NavItem = { label: string; icon: LucideIcon } & (
+  | { to: string; panel?: never }
+  | { panel: PanelName; to?: never }
+)
 
 /**
  * Desktop destinations, in the row rather than down a sidebar.
  *
- * Positions, History and Signals are the three panels the app is moving
- * towards, named for what they will be. Trade is here only until it becomes
- * the surface everything else sits on, at which point the logo is the way back
- * to it and this entry goes away.
+ * Trade is here only until it becomes the surface everything else sits on, at
+ * which point the logo is the way back to it and this entry goes away.
  */
 const items: NavItem[] = [
+  { panel: 'positions', label: 'Positions', icon: Briefcase },
   { to: MAIN_SURFACE, label: 'Trade', icon: CandlestickChart },
-  { to: '/wallet', label: 'History', icon: History },
+  { panel: 'history', label: 'History', icon: History },
   { to: '/signals', label: 'Signals', icon: Bot },
 ]
 
@@ -85,35 +88,32 @@ export function TopBar({
 
         <nav aria-label="Main" className="hidden lg:block">
           <ul className="flex items-center gap-1">
-            {/* Positions is a toggle, not a destination: it opens and closes a
-                column that sits beside the chart rather than replacing it.
-                aria-pressed says so, the way the chart's range control does. */}
-            <li>
-              <button
-                type="button"
-                onClick={() => panel.toggle('positions')}
-                aria-pressed={panel.panel === 'positions'}
-                className={item(panel.panel === 'positions')}
-              >
-                <Briefcase className="h-4 w-4" aria-hidden />
-                Positions
-              </button>
-            </li>
-
-            {items.map(({ to, label, icon: Icon }) => (
-              <li key={to}>
-                <NavLink
-                  to={to}
-                  className={({ isActive }) =>
-                    // Trade is the surface the panel sits on, so it stops
-                    // claiming to be the active thing while a panel is open.
-                    // Two lit items read as two places to be.
-                    item(isActive && !(to === MAIN_SURFACE && panel.panel !== null))
-                  }
-                >
-                  <Icon className="h-4 w-4" aria-hidden />
-                  {label}
-                </NavLink>
+            {items.map(({ to, panel: name, label, icon: Icon }) => (
+              <li key={label}>
+                {name ? (
+                  <button
+                    type="button"
+                    onClick={() => panel.toggle(name)}
+                    aria-pressed={panel.panel === name}
+                    className={item(panel.panel === name)}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden />
+                    {label}
+                  </button>
+                ) : (
+                  <NavLink
+                    to={to!}
+                    className={({ isActive }) =>
+                      // Trade is the surface the panels sit on, so it stops
+                      // claiming to be the active thing while one is open.
+                      // Two lit items read as two places to be.
+                      item(isActive && !(to === MAIN_SURFACE && panel.panel !== null))
+                    }
+                  >
+                    <Icon className="h-4 w-4" aria-hidden />
+                    {label}
+                  </NavLink>
+                )}
               </li>
             ))}
           </ul>

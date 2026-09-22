@@ -1,11 +1,15 @@
 // Screenshot runner for the implementation reports. Not a test -- Playwright
 // only collects *.spec.ts, so this never runs with the suite.
-// Usage: node e2e/shots.mjs <out-dir> [--drawer] [--panel] [--trade-only]
+// Usage: node e2e/shots.mjs <out-dir> [--drawer] [--panels=a,b] [--trade-only]
 import { chromium, devices } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 
 const out = process.argv[2] ?? '/tmp/shots'
 const flag = (name) => process.argv.includes(`--${name}`)
+const list = (name) =>
+  (process.argv.find((a) => a.startsWith(`--${name}=`))?.split('=')[1] ?? '')
+    .split(',')
+    .filter(Boolean)
 mkdirSync(out, { recursive: true })
 
 const PASSWORD = 'hunter2024'
@@ -58,10 +62,10 @@ for (const [name, opts] of viewports) {
 
   await page.screenshot({ path: `${out}/${name}-trade.png` })
 
-  if (flag('panel')) {
-    await page.goto('http://localhost:5173/trade?panel=positions')
+  for (const panel of list('panels')) {
+    await page.goto(`http://localhost:5173/trade?panel=${panel}`)
     await page.waitForTimeout(3000)
-    await page.screenshot({ path: `${out}/${name}-panel.png` })
+    await page.screenshot({ path: `${out}/${name}-${panel}.png` })
   }
 
   if (flag('drawer') && name !== 'desktop') {

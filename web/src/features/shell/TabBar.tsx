@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { CandlestickChart, Home, Wallet, Briefcase, type LucideIcon } from 'lucide-react'
+import { Briefcase, CandlestickChart, Home, Receipt, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { MAIN_SURFACE, usePanel } from './usePanel'
 
@@ -14,9 +14,9 @@ interface Tab {
  * is the only bar of its kind and carries its own landmark name.
  *
  * It goes away when Home is dissolved and Trade becomes the app's surface;
- * until then it is how a phone reaches what still exists. Positions is already
- * a panel rather than a screen, so its tab arrives at the surface with the
- * panel open, and highlights on the panel rather than on the path.
+ * until then it is how a phone reaches what still exists. The tabs that are
+ * panels rather than screens arrive at the surface with their panel open, and
+ * highlight on the panel rather than on the path.
  */
 export function TabBar() {
   const { pathname } = useLocation()
@@ -36,7 +36,12 @@ export function TabBar() {
       icon: Briefcase,
       active: panel === 'positions',
     },
-    { to: '/wallet', label: 'Wallet', icon: Wallet, active: pathname === '/wallet' },
+    {
+      to: href('history'),
+      label: 'History',
+      icon: Receipt,
+      active: panel === 'history',
+    },
   ]
 
   return (

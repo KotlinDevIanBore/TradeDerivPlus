@@ -12,6 +12,7 @@ import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
 import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
+import { HistoryPanel } from '@/features/wallet/HistoryPanel'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
 import { useIsAuthenticated, useSessionStore } from '@/store/session'
 import { AccountSwitcher } from './AccountSwitcher'
@@ -20,7 +21,17 @@ import { overlay, useOverlayOpen } from './overlays'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
-import { MAIN_SURFACE, usePanel } from './usePanel'
+import { MAIN_SURFACE, usePanel, type PanelName } from './usePanel'
+
+/**
+ * What each panel is called and what is inside it. One place, so adding a
+ * panel is an entry here and a name in PANELS rather than another branch in
+ * the shell's markup.
+ */
+const panels: Record<PanelName, { title: string; content: React.ReactNode }> = {
+  positions: { title: 'Positions', content: <PositionsPanel /> },
+  history: { title: 'History', content: <HistoryPanel /> },
+}
 
 /**
  * The persistent frame around every authenticated screen. It owns account
@@ -145,11 +156,16 @@ export function AppShell() {
 
       <div className="flex w-full flex-1">
         {/* A column beside the chart on a desktop, a full-screen sheet on a
-            phone. It is mounted once, here, so the panel outlives whichever
-            screen is under it -- and so its content keeps the symbols it
-            watches registered with the shell's one price feed. */}
-        <Panel open={panel === 'positions'} onClose={closePanel} title="Positions">
-          <PositionsPanel />
+            phone. One panel is open at a time and it is mounted once, here, so
+            it outlives whichever screen is under it -- and so its content
+            keeps the symbols it watches registered with the shell's one price
+            feed. */}
+        <Panel
+          open={panel !== null}
+          onClose={closePanel}
+          title={panel ? panels[panel].title : ''}
+        >
+          {panel ? panels[panel].content : null}
         </Panel>
 
         <main

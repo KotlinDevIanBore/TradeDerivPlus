@@ -14,27 +14,17 @@ export const PASSWORD = 'hunter2024'
  * bottom bar on a phone, the top bar on a desktop. These specs run in both
  * projects, and they care about arriving, not about which bar got them there.
  *
- * The two do not agree on names: the top bar already calls its destinations
- * what they are becoming (Positions, History), while the bottom bar still says
- * Portfolio and Wallet. Home has no top-bar entry at all -- the logo is the
- * way back, as it will be when Trade becomes the app's surface.
+ * Only screens are reachable this way now; the panels have their own helpers
+ * below. Home has no top-bar entry at all -- the logo is the way back, as it
+ * will be when Trade becomes the app's surface.
  */
-const WIDE_LABELS: Record<string, string> = {
-  Trade: 'Trade',
-  Wallet: 'History',
-  Signals: 'Signals',
-}
-
 export async function goTo(page: Page, destination: string) {
-  const wide = (page.viewportSize()?.width ?? 0) >= 1024
-
-  if (wide && destination === 'Home') {
+  if (isWide(page) && destination === 'Home') {
     await page.getByRole('link', { name: 'TradeDerivPlus home' }).click()
     return
   }
 
-  const label = wide ? (WIDE_LABELS[destination] ?? destination) : destination
-  await page.locator('nav:visible').getByRole('link', { name: label, exact: true }).click()
+  await page.locator('nav:visible').getByRole('link', { name: destination, exact: true }).click()
 }
 
 function isWide(page: Page) {
@@ -42,40 +32,67 @@ function isWide(page: Page) {
 }
 
 /**
- * The Positions panel, whichever container it is in: a column in the page on a
- * desktop, a modal sheet on a phone. Specs care that the positions are there,
- * not which of the two is rendering them.
+ * A panel, whichever container it is in: a column in the page on a desktop, a
+ * modal sheet on a phone. Specs care that the content is there, not which of
+ * the two is rendering it.
  */
-export function positionsPanel(page: Page) {
+export function panelOf(page: Page, name: string) {
   return page
-    .getByRole('complementary', { name: 'Positions' })
-    .or(page.getByRole('dialog', { name: 'Positions' }))
+    .getByRole('complementary', { name })
+    .or(page.getByRole('dialog', { name, exact: true }))
 }
 
 /**
- * Opens the panel however this viewport opens it, and leaves it open.
+ * Opens a panel however this viewport opens it, and leaves it open.
  *
  * On a desktop the control is a toggle, and a one-shot "is it open?" check
  * raced the render that follows a route change: probe too early, decide it is
  * closed, and the click that follows shuts a panel that had just opened. So
  * the whole open-and-check retries until the panel is actually there.
  */
-export async function openPositions(page: Page) {
-  const panel = positionsPanel(page)
+export async function openPanel(page: Page, name: string) {
+  const it = panelOf(page, name)
 
   await expect(async () => {
-    if (!(await panel.isVisible())) {
-      if (isWide(page)) await page.getByRole('button', { name: 'Positions' }).click()
-      else await page.locator('nav:visible').getByRole('link', { name: 'Positions' }).click()
+    if (!(await it.isVisible())) {
+      if (isWide(page)) await page.getByRole('button', { name, exact: true }).click()
+      else await page.locator('nav:visible').getByRole('link', { name, exact: true }).click()
     }
-    await expect(panel).toBeVisible({ timeout: 2_000 })
+    await expect(it).toBeVisible({ timeout: 2_000 })
+
+    // And still open a moment later. A probe that lands between a navigation
+    // and the render it causes can read "closed" for a panel that was opening,
+    // and the click that follows shuts it just after this saw it open.
+    await page.waitForTimeout(400)
+    await expect(it).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 20_000 })
 }
 
-export async function closePositions(page: Page) {
+/**
+ * Clicks a position card's Close, and leaves the confirmation open.
+ *
+ * A card redraws as its price ticks, so a click can land on a node React has
+ * just replaced. Playwright retries a detached click by itself but can lose
+ * the same race again, so the click and its result are retried together.
+ */
+export async function beginClosePosition(page: Page) {
+  const confirm = page.getByRole('dialog', { name: 'Close position' })
+
+  await expect(async () => {
+    if (!(await confirm.isVisible())) {
+      await panelOf(page, 'Positions')
+        .getByRole('button', { name: 'Close position', exact: true })
+        .first()
+        .click({ timeout: 5_000 })
+    }
+    await expect(confirm).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
+}
+
+export async function closePanel(page: Page, name: string) {
   // Exact: "Close Positions" would otherwise also answer to a search for the
   // "Close position" button on a card, which is a different thing entirely.
-  await page.getByRole('button', { name: 'Close Positions', exact: true }).click()
+  await page.getByRole('button', { name: `Close ${name}`, exact: true }).click()
 }
 
 /** Registers through the UI, which is also how the signup path gets covered. */

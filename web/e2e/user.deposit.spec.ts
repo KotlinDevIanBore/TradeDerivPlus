@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { goTo, newPhone, register } from './helpers'
+import { newPhone, register } from './helpers'
 
 test.describe('Depositing with M-Pesa', () => {
   test('walks amount, waiting and result, and settles without a reload', async ({ page }) => {
     const phone = newPhone()
     await register(page, phone)
 
-    // Deposits are real money, so a real account is needed first.
-    await goTo(page, 'Wallet')
+    // Signup lands on Home, which carries the balance card and its deposit
+    // button. Deposits are real money, so a real account is needed first.
     await page.getByRole('button', { name: 'Switch account' }).click()
     await page.getByRole('button', { name: 'Create real account' }).click()
     await expect(page.getByText('REAL').first()).toBeVisible()
@@ -47,7 +47,6 @@ test.describe('Depositing with M-Pesa', () => {
 
   test('sends a demo user to their real account rather than taking money', async ({ page }) => {
     await register(page, newPhone())
-    await goTo(page, 'Wallet')
 
     await page.getByRole('button', { name: 'Top up demo' }).first().click()
     await expect(page.getByText(/Deposits go to a real account|Switch to your real account/)).toBeVisible()

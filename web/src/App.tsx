@@ -12,7 +12,6 @@ import { AppShell } from '@/features/shell/AppShell'
 import { PanelRedirect } from '@/features/shell/redirects'
 import { SignalsScreen } from '@/features/signals/SignalsScreen'
 import { TradeScreen } from '@/features/trading/TradeScreen'
-import { WalletScreen } from '@/features/wallet/WalletScreen'
 
 // The admin console is a separate product with its own session and layout.
 // Loading it lazily keeps it out of the user app's bundle entirely.
@@ -64,7 +63,7 @@ export default function App() {
               path="/portfolio"
               element={<PanelRedirect panel="positions" carry={['tab']} />}
             />
-            <Route path="/wallet" element={<WalletScreen />} />
+            <Route path="/wallet" element={<PanelRedirect panel="history" />} />
             <Route path="/signals" element={<SignalsScreen />} />
             <Route path="/profile" element={<ProfileScreen />} />
           </Route>

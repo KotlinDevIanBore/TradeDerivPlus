@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/cn'
@@ -52,11 +53,24 @@ export function Sheet({
   // Both fill an edge of the screen and scroll inside themselves.
   const column = drawer || panel
 
+  // Whatever was focused when this opened. Radix returns focus to a
+  // Dialog.Trigger on close, and every sheet in this app is opened from code
+  // rather than from a trigger -- so without this, closing one drops focus on
+  // the body and a keyboard starts again from the top of the page.
+  const opener = useRef<HTMLElement | null>(null)
+
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 animate-fade-in" />
         <Dialog.Content
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement as HTMLElement | null
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            opener.current?.focus()
+          }}
           className={cn(
             'fixed z-50 border-border bg-elevated text-text focus:outline-none',
             drawer

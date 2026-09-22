@@ -1,12 +1,5 @@
 import { expect, test } from '@playwright/test'
-import {
-  closePositions,
-  goTo,
-  newPhone,
-  openPositions,
-  positionsPanel,
-  register,
-} from './helpers'
+import { beginClosePosition, closePanel, goTo, newPhone, openPanel, register } from './helpers'
 
 test.describe('A user trading', () => {
   test('registers, opens a position, and closes it with the balance adding up', async ({ page }) => {
@@ -40,11 +33,8 @@ test.describe('A user trading', () => {
 
     // Positions is a panel over the chart now, not a screen to travel to.
     await goTo(page, 'Trade')
-    await openPositions(page)
-    await positionsPanel(page)
-      .getByRole('button', { name: 'Close position', exact: true })
-      .first()
-      .click()
+    await openPanel(page, 'Positions')
+    await beginClosePosition(page)
 
     // The confirmation restates the position before anything settles.
     await expect(page.getByText(/^Close R_75/)).toBeVisible()
@@ -57,7 +47,7 @@ test.describe('A user trading', () => {
 
     // On a phone the panel is a modal and holds the app behind it, so it has
     // to be put away before anything else is reachable.
-    await closePositions(page)
+    await closePanel(page, 'Positions')
 
     // The stake plus its result came back, so the total is near where it was.
     await goTo(page, 'Home')

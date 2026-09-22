@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -18,29 +18,35 @@ import { usePanel } from './usePanel'
 const row =
   'flex w-full items-center gap-3 rounded-xl px-3 py-3 text-body font-medium transition-colors'
 
+/**
+ * Somewhere to go. Panels share a path and differ by query string, so what is
+ * current is passed in rather than read off the URL -- NavLink would light
+ * every panel entry at once.
+ */
 function Destination({
   to,
   label,
   icon: Icon,
+  active,
   onNavigate,
 }: {
   to: string
   label: string
   icon: LucideIcon
+  active: boolean
   onNavigate: () => void
 }) {
   return (
     <li>
-      <NavLink
+      <Link
         to={to}
         onClick={onNavigate}
-        className={({ isActive }) =>
-          cn(row, isActive ? 'bg-accent-subtle text-accent' : 'text-text hover:bg-surface')
-        }
+        aria-current={active ? 'page' : undefined}
+        className={cn(row, active ? 'bg-accent-subtle text-accent' : 'text-text hover:bg-surface')}
       >
         <Icon className="h-5 w-5 shrink-0 text-muted" aria-hidden />
         {label}
-      </NavLink>
+      </Link>
     </li>
   )
 }
@@ -74,7 +80,8 @@ function Action({
  */
 export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const logout = useLogout()
-  const { href } = usePanel()
+  const { pathname } = useLocation()
+  const { panel, href } = usePanel()
   const close = () => onOpenChange(false)
 
   return (
@@ -85,17 +92,36 @@ export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange:
       <div className="flex min-h-full flex-col">
         <nav aria-label="Menu">
           <ul className="-mx-1 space-y-0.5">
-          <Action label="Deposit" icon={ArrowDownToLine} onClick={overlay.deposit} />
-          <Action label="Withdraw" icon={ArrowUpFromLine} onClick={overlay.withdraw} />
-          <Destination
-            to={href('positions')}
-            label="Positions"
-            icon={Briefcase}
-            onNavigate={close}
-          />
-          <Destination to="/wallet" label="History" icon={History} onNavigate={close} />
-            <Destination to="/signals" label="Signals" icon={Bot} onNavigate={close} />
-            <Destination to="/profile" label="Account" icon={UserIcon} onNavigate={close} />
+            <Action label="Deposit" icon={ArrowDownToLine} onClick={overlay.deposit} />
+            <Action label="Withdraw" icon={ArrowUpFromLine} onClick={overlay.withdraw} />
+            <Destination
+              to={href('positions')}
+              label="Positions"
+              icon={Briefcase}
+              active={panel === 'positions'}
+              onNavigate={close}
+            />
+            <Destination
+              to={href('history')}
+              label="History"
+              icon={History}
+              active={panel === 'history'}
+              onNavigate={close}
+            />
+            <Destination
+              to="/signals"
+              label="Signals"
+              icon={Bot}
+              active={pathname === '/signals'}
+              onNavigate={close}
+            />
+            <Destination
+              to="/profile"
+              label="Account"
+              icon={UserIcon}
+              active={pathname === '/profile'}
+              onNavigate={close}
+            />
           </ul>
         </nav>
 

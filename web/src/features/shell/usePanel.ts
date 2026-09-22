@@ -9,8 +9,8 @@ import { mergeParams } from '@/lib/searchParams'
  */
 export const MAIN_SURFACE = '/trade'
 
-/** Phase 3 adds history, signals and account. */
-export const PANELS = ['positions'] as const
+/** Phase 3 adds signals and account alongside these. */
+export const PANELS = ['positions', 'history'] as const
 export type PanelName = (typeof PANELS)[number]
 
 /**
@@ -63,7 +63,12 @@ export function usePanel() {
   const open = (name: PanelName) =>
     onMainSurface ? setParams(mergeParams({ panel: name })) : navigate(href(name))
 
-  const close = () => setParams(mergeParams({ panel: desktop ? CLOSED : null }))
+  // Closing means going back to the default, and on a desktop the default is
+  // Positions. So closing Positions is the one case that has to name the
+  // closed state: dropping the parameter there would reopen what was just
+  // dismissed. Closing any other panel simply lets the default return.
+  const close = () =>
+    setParams(mergeParams({ panel: desktop && panel === 'positions' ? CLOSED : null }))
 
   return {
     panel,
