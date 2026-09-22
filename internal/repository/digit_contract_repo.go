@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -112,10 +113,10 @@ func (r *DigitContractRepo) Void(ctx context.Context, id uuid.UUID, pnl decimal.
 }
 
 func (r *DigitContractRepo) ListByAccount(ctx context.Context, accountID uuid.UUID, status string, limit, offset int) ([]models.DigitContract, int, error) {
+	countWhere, args := digitListWhere(accountID, status, "")
 	var total int
-	if err := r.db.QueryRow(ctx, `
-		SELECT count(*) FROM digit_contracts
-		WHERE account_id = $1 AND ($2 = '' OR status = $2)`, accountID, status,
+	if err := r.db.QueryRow(ctx,
+		`SELECT count(*) FROM digit_contracts WHERE `+countWhere, args...,
 	).Scan(&total); err != nil {
 		return nil, 0, mapErr(err)
 	}
@@ -125,9 +126,14 @@ func (r *DigitContractRepo) ListByAccount(ctx context.Context, accountID uuid.UU
 		order = ` ORDER BY c.settled_at DESC NULLS LAST`
 	}
 
+	listWhere, _ := digitListWhere(accountID, status, "c")
+	limitIdx := len(args) + 1
+	offsetIdx := len(args) + 2
+	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := r.db.Query(ctx,
-		digitSelect+` WHERE c.account_id = $1 AND ($2 = '' OR c.status = $2)`+order+` LIMIT $3 OFFSET $4`,
-		accountID, status, limit, offset)
+		digitSelect+` WHERE `+listWhere+order+
+			fmt.Sprintf(` LIMIT $%d OFFSET $%d`, limitIdx, offsetIdx),
+		queryArgs...)
 	if err != nil {
 		return nil, 0, mapErr(err)
 	}
@@ -142,6 +148,25 @@ func (r *DigitContractRepo) ListByAccount(ctx context.Context, accountID uuid.UU
 		out = append(out, *c)
 	}
 	return out, total, rows.Err()
+}
+
+// digitListWhere builds a WHERE body. alias "" uses bare column names; "c" for joins.
+// status "" → all; "settled" → won|lost|void; otherwise exact status.
+func digitListWhere(accountID uuid.UUID, status, alias string) (string, []any) {
+	col := func(name string) string {
+		if alias == "" {
+			return name
+		}
+		return alias + "." + name
+	}
+	switch status {
+	case "":
+		return col("account_id") + ` = $1`, []any{accountID}
+	case "settled":
+		return col("account_id") + ` = $1 AND ` + col("status") + ` IN ('won','lost','void')`, []any{accountID}
+	default:
+		return col("account_id") + ` = $1 AND ` + col("status") + ` = $2`, []any{accountID, status}
+	}
 }
 
 // ListAllOpen feeds the tick settler and the sweep.
