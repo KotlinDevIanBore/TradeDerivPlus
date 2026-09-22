@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Briefcase, History } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ErrorState } from '@/components/ErrorState'
@@ -9,17 +9,23 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { toast } from '@/components/ui/Toast'
-import { PageHeader } from '@/features/shell/PageHeader'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
-import { usePriceStream } from '@/hooks/usePriceStream'
+import { usePanel } from '@/features/shell/usePanel'
+import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import { useCloseTrade, useTradeSummary, useTrades } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { dayLabel, signedMoney } from '@/lib/format'
 import { pnl } from '@/lib/pnl'
+import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice } from '@/store/market'
 import type { Trade } from '@/types'
 import { ClosedTradeRow, PositionCard } from './PositionCard'
 
+/**
+ * Three figures across the top on a phone, where the panel is the whole
+ * screen, and three rows down a desktop panel, where 300px of column cannot
+ * hold three money values side by side without truncating one of them.
+ */
 function SummaryTile({
   label,
   children,
@@ -28,9 +34,9 @@ function SummaryTile({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex-1 rounded-card border border-border bg-surface px-4 py-3">
+    <div className="flex-1 rounded-card border border-border bg-surface px-4 py-3 lg:flex lg:items-baseline lg:justify-between lg:gap-3 lg:py-2">
       <p className="text-meta text-muted">{label}</p>
-      <p className="mt-1 text-card font-bold">{children}</p>
+      <p className="mt-1 text-card font-bold lg:mt-0">{children}</p>
     </div>
   )
 }
@@ -85,8 +91,14 @@ function CloseConfirm({
   )
 }
 
-export function PortfolioScreen() {
+/**
+ * Everything the Portfolio screen used to be, inside the panel that replaced
+ * it. It supplies no padding and no title of its own: the panel around it owns
+ * both, and owns them differently at each width.
+ */
+export function PositionsPanel() {
   const [params, setParams] = useSearchParams()
+  const { close } = usePanel()
   const { accountId } = useActiveAccount()
   const tab = params.get('tab') === 'closed' ? 'closed' : 'open'
 
@@ -104,7 +116,7 @@ export function PortfolioScreen() {
     () => [...new Set((openTrades.data?.items ?? []).map((t) => t.symbol_code))],
     [openTrades.data],
   )
-  usePriceStream(symbols)
+  useWatchSymbols(symbols)
   useRelativeTime()
 
   // Group closed trades under sticky day headings.
@@ -135,9 +147,7 @@ export function PortfolioScreen() {
 
   return (
     <div>
-      <PageHeader title="Portfolio" />
-
-      <div className="flex gap-2 px-gutter pb-3 lg:px-6">
+      <div className="flex gap-2 pb-3 lg:flex-col lg:gap-1.5">
         {summary.isLoading ? (
           <>
             <Skeleton className="h-[68px] flex-1 rounded-card" />
@@ -172,13 +182,16 @@ export function PortfolioScreen() {
         )}
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
-        <TabsList className="px-gutter lg:px-6">
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setParams(mergeParams({ tab: v }), { replace: true })}
+      >
+        <TabsList>
           <TabsTrigger value="open">Open</TabsTrigger>
           <TabsTrigger value="closed">Closed</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="open" className="space-y-3 px-gutter py-4 lg:px-6">
+        <TabsContent value="open" className="space-y-3 py-4">
           {openTrades.isLoading ? (
             <>
               <Skeleton className="h-[180px] w-full rounded-card" />
@@ -190,10 +203,11 @@ export function PortfolioScreen() {
             <EmptyState
               icon={Briefcase}
               title="No open positions"
-              hint="Open one from the Trade screen to see it here."
+              hint="Open one from the chart to see it here."
               action={
-                <Button asChild variant="outline" size="sm">
-                  <Link to="/trade">Go to Trade</Link>
+                // The chart is behind this panel now, not somewhere to go.
+                <Button variant="outline" size="sm" onClick={close}>
+                  Close
                 </Button>
               }
             />
@@ -213,7 +227,7 @@ export function PortfolioScreen() {
 
         <TabsContent value="closed" className="py-4">
           {closedTrades.isLoading ? (
-            <div className="space-y-2 px-gutter lg:px-6">
+            <div className="space-y-2">
               <Skeleton className="h-16 w-full rounded-card" />
               <Skeleton className="h-16 w-full rounded-card" />
             </div>
@@ -222,10 +236,12 @@ export function PortfolioScreen() {
           ) : closedByDay.length === 0 ? (
             <EmptyState icon={History} title="No closed trades yet" hint="Your history will build up here." />
           ) : (
-            <div className="px-gutter lg:px-6">
+            <div>
               {closedByDay.map(([day, trades]) => (
                 <section key={day} className="mb-4">
-                  <h3 className="sticky top-14 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
+                  {/* The panel scrolls itself, so a day heading sticks to the
+                      top of the panel rather than to the top bar's height. */}
+                  <h3 className="sticky top-0 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
                     {day}
                   </h3>
                   <ul className="divide-y divide-hairline rounded-card border border-border bg-surface">

@@ -11,8 +11,9 @@ import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
+import { usePanel } from '@/features/shell/usePanel'
 import { signalHref } from '@/features/signals/SignalCard'
-import { usePriceStream } from '@/hooks/usePriceStream'
+import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import {
   useCloseTrade,
   useOpenTrade,
@@ -27,6 +28,7 @@ import { cn } from '@/lib/cn'
 import { money, percent, price as fmtPrice, relativeTime, signedPercent } from '@/lib/format'
 import { dec } from '@/lib/money'
 import { pnl } from '@/lib/pnl'
+import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
 import { ChartRangeToggle } from './ChartRangeToggle'
 import { windowChange, type ChartRange, type WindowChange } from './chartRange'
@@ -44,6 +46,7 @@ const CONFIRM_THRESHOLD = 0.2
 export function TradeScreen() {
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
+  const { open: openPanel } = usePanel()
   const { accountId, isDemo } = useActiveAccount()
 
   const symbolsQuery = useSymbols()
@@ -74,7 +77,7 @@ export function TradeScreen() {
     for (const t of openTrades.data?.items ?? []) codes.add(t.symbol_code)
     return [...codes]
   }, [symbolCode, openTrades.data])
-  usePriceStream(streamed)
+  useWatchSymbols(streamed)
   useRelativeTime()
 
   const tick = usePrice(symbolCode)
@@ -111,8 +114,12 @@ export function TradeScreen() {
   const expiredSignal = params.get('expired') === '1'
 
   const selectSymbol = (code: string) => {
-    // Changing symbol drops any signal prefill; those levels were for the old one.
-    setParams({ symbol: code }, { replace: true })
+    // Changing symbol drops any signal prefill; those levels were for the old
+    // one. Anything else on the URL belongs to somebody else and is kept.
+    setParams(
+      mergeParams({ symbol: code, direction: null, sl: null, tp: null, expired: null }),
+      { replace: true },
+    )
   }
 
   const submit = (values: TicketValues) => {
@@ -144,7 +151,9 @@ export function TradeScreen() {
       },
       {
         onSuccess: () => {
-          toast.action('Position opened', 'View in Portfolio', () => navigate('/portfolio'), 'success')
+          // Positions is a panel over this screen now, so the offer is to open
+          // it rather than to go somewhere.
+          toast.action('Position opened', 'View positions', () => openPanel('positions'), 'success')
         },
       },
     )

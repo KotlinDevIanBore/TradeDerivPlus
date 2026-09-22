@@ -6,13 +6,9 @@ import { Spinner } from '@/components/Spinner'
 import { Toaster } from '@/components/ui/Toast'
 import { LoginScreen } from '@/features/auth/LoginScreen'
 import { RegisterScreen } from '@/features/auth/RegisterScreen'
-import { HomeScreen } from '@/features/home/HomeScreen'
-import { PortfolioScreen } from '@/features/portfolio/PortfolioScreen'
-import { ProfileScreen } from '@/features/profile/ProfileScreen'
 import { AppShell } from '@/features/shell/AppShell'
-import { SignalsScreen } from '@/features/signals/SignalsScreen'
+import { PanelRedirect, SurfaceRedirect } from '@/features/shell/redirects'
 import { TradeScreen } from '@/features/trading/TradeScreen'
-import { WalletScreen } from '@/features/wallet/WalletScreen'
 
 // The admin console is a separate product with its own session and layout.
 // Loading it lazily keeps it out of the user app's bundle entirely.
@@ -58,12 +54,15 @@ export default function App() {
           <Route path="/register" element={<RegisterScreen />} />
 
           <Route element={<AppShell />}>
-            <Route path="/" element={<HomeScreen />} />
-            <Route path="/trade" element={<TradeScreen />} />
-            <Route path="/portfolio" element={<PortfolioScreen />} />
-            <Route path="/wallet" element={<WalletScreen />} />
-            <Route path="/signals" element={<SignalsScreen />} />
-            <Route path="/profile" element={<ProfileScreen />} />
+            <Route path="/" element={<TradeScreen />} />
+            <Route path="/trade" element={<SurfaceRedirect />} />
+            <Route
+              path="/portfolio"
+              element={<PanelRedirect panel="positions" carry={['tab']} />}
+            />
+            <Route path="/wallet" element={<PanelRedirect panel="history" />} />
+            <Route path="/signals" element={<PanelRedirect panel="signals" />} />
+            <Route path="/profile" element={<PanelRedirect panel="account" />} />
           </Route>
 
           <Route

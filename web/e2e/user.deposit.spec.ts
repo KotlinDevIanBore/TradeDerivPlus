@@ -1,13 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { newPhone, register } from './helpers'
+import { newPhone, openPanel, register } from './helpers'
 
 test.describe('Depositing with M-Pesa', () => {
   test('walks amount, waiting and result, and settles without a reload', async ({ page }) => {
     const phone = newPhone()
     await register(page, phone)
 
-    // Deposits are real money, so a real account is needed first.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Wallet', exact: true }).first().click()
+    // Deposits are real money, so a real account is needed first. Both the
+    // switcher and the deposit button are in the bar above the surface.
     await page.getByRole('button', { name: 'Switch account' }).click()
     await page.getByRole('button', { name: 'Create real account' }).click()
     await expect(page.getByText('REAL').first()).toBeVisible()
@@ -36,7 +36,10 @@ test.describe('Depositing with M-Pesa', () => {
     const succeeded = await page.getByText('KES 12,950 deposited').isVisible()
     if (succeeded) {
       await expect(page.getByText('$100.00 is now in your balance.')).toBeVisible()
-      await page.getByRole('button', { name: 'Done' }).click()
+
+      // The success step's one button closes the sheet onto the chart. It
+      // used to navigate to the Trade screen, which is now what is behind it.
+      await page.getByRole('button', { name: 'Start trading' }).click()
       await expect(page.getByText('$100.00').first()).toBeVisible()
     } else {
       // The mock fails about one in six on purpose; the failure path must
@@ -47,8 +50,10 @@ test.describe('Depositing with M-Pesa', () => {
 
   test('sends a demo user to their real account rather than taking money', async ({ page }) => {
     await register(page, newPhone())
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Wallet', exact: true }).first().click()
 
+    // The balance card's own call to action, which lives in the History panel
+    // now that Home is gone.
+    await openPanel(page, 'History')
     await page.getByRole('button', { name: 'Top up demo' }).first().click()
     await expect(page.getByText(/Deposits go to a real account|Switch to your real account/)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Send STK push' })).toHaveCount(0)

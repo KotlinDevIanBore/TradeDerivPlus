@@ -26,7 +26,9 @@ test.describe('The admin console', () => {
     await expect(confirm).toBeEnabled()
     await confirm.click()
 
-    await expect(page.getByText('FROZEN')).toBeVisible()
+    // Exact, and in the badge's own casing: a loose match also finds the
+    // toast that says "Account NNNNNN frozen" while it is still on screen.
+    await expect(page.getByText('frozen', { exact: true })).toBeVisible()
 
     // The user, in their own browser, is refused and told why.
     const userContext = await browser.newContext()
@@ -37,7 +39,7 @@ test.describe('The admin console', () => {
     await userPage.getByRole('button', { name: 'Log in' }).click()
     await userPage.waitForURL('**/')
 
-    await userPage.goto('/trade')
+    // Logging in lands on the surface; the ticket is right there.
     await expect(userPage.getByRole('button', { name: /Buy R_75 for/ })).toBeEnabled({ timeout: 30_000 })
     await userPage.getByRole('button', { name: /Buy R_75 for/ }).click()
     await expect(userPage.getByText(/This account is frozen/)).toBeVisible()

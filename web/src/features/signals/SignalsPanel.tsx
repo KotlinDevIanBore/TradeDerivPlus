@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Bot } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ErrorState } from '@/components/ErrorState'
-import { PageHeader } from '@/features/shell/PageHeader'
+import { usePanelScroll } from '@/components/ui/panelScroll'
 import { useSignalStream } from '@/hooks/useSignalStream'
 import { useSignals, useSymbols } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { cn } from '@/lib/cn'
 import { SignalCard, SignalCardSkeleton } from './SignalCard'
 
-export function SignalsScreen() {
+export function SignalsPanel() {
   const [symbol, setSymbol] = useState<string | undefined>(undefined)
   const [newCount, setNewCount] = useState(0)
   const scrolledRef = useRef(false)
@@ -18,19 +18,26 @@ export function SignalsScreen() {
   const signals = useSignals(symbol, 30)
   useRelativeTime()
 
+  // The panel scrolls itself, so this watches the panel. Watching the window
+  // would mean watching something that never moves, and the pill would never
+  // appear.
+  const scroller = usePanelScroll()
+
   // A push while the user is scrolled down becomes a pill rather than a jump.
   useSignalStream(() => {
     if (scrolledRef.current) setNewCount((n) => n + 1)
   })
 
   useEffect(() => {
+    if (!scroller) return
+
     const onScroll = () => {
-      scrolledRef.current = window.scrollY > 200
-      if (window.scrollY <= 200) setNewCount(0)
+      scrolledRef.current = scroller.scrollTop > 200
+      if (scroller.scrollTop <= 200) setNewCount(0)
     }
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
+  }, [scroller])
 
   // Only offer chips for symbols the bot actually covers.
   const chips = useMemo(() => {
@@ -41,9 +48,7 @@ export function SignalsScreen() {
 
   return (
     <div>
-      <PageHeader title="Signals" />
-
-      <div className="no-scrollbar flex gap-2 overflow-x-auto px-gutter pb-3 lg:px-6">
+      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-3">
         <button
           type="button"
           onClick={() => setSymbol(undefined)}
@@ -73,12 +78,13 @@ export function SignalsScreen() {
         ))}
       </div>
 
+      {/* The pill sticks to the top of the panel, which is what scrolls. */}
       {newCount > 0 ? (
-        <div className="sticky top-16 z-20 flex justify-center px-gutter">
+        <div className="sticky top-2 z-20 flex justify-center">
           <button
             type="button"
             onClick={() => {
-              window.scrollTo({ top: 0, behavior: 'smooth' })
+              scroller?.scrollTo({ top: 0, behavior: 'smooth' })
               setNewCount(0)
             }}
             className="flex items-center gap-1.5 rounded-pill bg-accent px-3 py-1.5 text-meta font-semibold text-white shadow-lg animate-fade-in"
@@ -89,15 +95,17 @@ export function SignalsScreen() {
         </div>
       ) : null}
 
-      <div className="space-y-3 px-gutter py-2 lg:grid lg:grid-cols-2 lg:gap-3 lg:space-y-0 lg:px-6">
+      {/* One column at every width now: the two the page had do not fit in a
+          column beside a chart. */}
+      <div className="space-y-3 py-2">
         {signals.isLoading ? (
           Array.from({ length: 4 }).map((_, i) => <SignalCardSkeleton key={i} compact />)
         ) : signals.isError ? (
-          <div className="lg:col-span-2">
+          <div>
             <ErrorState error={signals.error} onRetry={() => signals.refetch()} />
           </div>
         ) : (signals.data?.items.length ?? 0) === 0 ? (
-          <div className="lg:col-span-2">
+          <div>
             <EmptyState
               icon={Bot}
               title={symbol ? `No signals for ${symbol} yet` : 'No signals yet'}

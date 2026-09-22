@@ -52,11 +52,16 @@ export default {
       spacing: {
         gutter: '16px',
         tabbar: '64px',
+        // The sticky top bar's height. Anything that pins itself below the bar
+        // reads it from here, so the bar's height is stated in one place
+        // instead of being hand-matched at each sticky element.
+        topbar: '56px',
       },
       keyframes: {
         'flash-up':   { '0%': { color: '#22C55E' }, '100%': { color: 'inherit' } },
         'flash-down': { '0%': { color: '#E24B4A' }, '100%': { color: 'inherit' } },
         'slide-up':   { '0%': { transform: 'translateY(100%)' }, '100%': { transform: 'translateY(0)' } },
+        'slide-in-left': { '0%': { transform: 'translateX(-100%)' }, '100%': { transform: 'translateX(0)' } },
         'fade-in':    { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
         'shimmer':    { '0%': { backgroundPosition: '-400px 0' }, '100%': { backgroundPosition: '400px 0' } },
       },
@@ -64,6 +69,7 @@ export default {
         'flash-up':   'flash-up 300ms ease-out',
         'flash-down': 'flash-down 300ms ease-out',
         'slide-up':   'slide-up 220ms cubic-bezier(0.32,0.72,0,1)',
+        'slide-in-left': 'slide-in-left 220ms cubic-bezier(0.32,0.72,0,1)',
         'fade-in':    'fade-in 150ms ease-out',
         'shimmer':    'shimmer 1.4s linear infinite',
       },

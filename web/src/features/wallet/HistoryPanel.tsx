@@ -4,18 +4,16 @@ import { EmptyState } from '@/components/EmptyState'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { BalanceCard } from '@/features/home/BalanceCard'
-import { PageHeader } from '@/features/shell/PageHeader'
+import { overlay } from '@/features/shell/overlays'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useTransactions, useWallet } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { cn } from '@/lib/cn'
 import { useSessionStore } from '@/store/session'
 import type { Transaction, TxType } from '@/types'
-import { DepositSheet } from './DepositSheet'
+import { BalanceCard } from './BalanceCard'
 import { TransactionDetail } from './TransactionDetail'
 import { TransactionRow } from './TransactionRow'
-import { WithdrawSheet } from './WithdrawSheet'
 
 const FILTERS: { label: string; types?: TxType[] }[] = [
   { label: 'All' },
@@ -24,14 +22,19 @@ const FILTERS: { label: string; types?: TxType[] }[] = [
   { label: 'Trades', types: ['trade_open', 'trade_close'] },
 ]
 
-export function WalletScreen() {
-  const { account, accountId, accounts, isDemo } = useActiveAccount()
-  const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
+/**
+ * The money that has moved: the balance it adds up to, and every deposit,
+ * withdrawal and trade behind it.
+ *
+ * The filter is component state rather than a URL parameter. Unlike the
+ * Positions panel's tab, nothing links to a filtered history -- it is a thing
+ * you narrow while looking, not a place you send someone.
+ */
+export function HistoryPanel() {
+  const { account, accountId, isDemo } = useActiveAccount()
   const user = useSessionStore((s) => s.user)
 
   const [filterIndex, setFilterIndex] = useState(0)
-  const [depositOpen, setDepositOpen] = useState(false)
-  const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [detail, setDetail] = useState<Transaction | null>(null)
 
   const wallet = useWallet(accountId)
@@ -39,7 +42,6 @@ export function WalletScreen() {
   const transactions = useTransactions(accountId, filter.types, 50)
   useRelativeTime()
 
-  const realAccount = accounts.find((a) => a.account_type === 'real') ?? null
   const canWithdraw = user?.kyc_status === 'verified'
 
   // Pending deposits are pinned to the top: they are what a user comes back for.
@@ -53,23 +55,20 @@ export function WalletScreen() {
 
   return (
     <div>
-      <PageHeader title="Wallet" />
+      <BalanceCard
+        account={account}
+        wallet={wallet.data}
+        isLoading={wallet.isLoading}
+        isError={wallet.isError}
+        onRetry={() => wallet.refetch()}
+        onDeposit={overlay.deposit}
+        onWithdraw={overlay.withdraw}
+        canWithdraw={canWithdraw}
+        withdrawHint="Verify your identity to withdraw"
+      />
 
-      <div className="px-gutter lg:px-6">
-        <BalanceCard
-          account={account}
-          wallet={wallet.data}
-          isLoading={wallet.isLoading}
-          isError={wallet.isError}
-          onRetry={() => wallet.refetch()}
-          onDeposit={() => setDepositOpen(true)}
-          onWithdraw={() => setWithdrawOpen(true)}
-          canWithdraw={canWithdraw}
-          withdrawHint="Verify your identity to withdraw"
-        />
-      </div>
-
-      <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto px-gutter lg:px-6">
+      {/* The chips scroll sideways: four of them do not fit across a panel. */}
+      <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto">
         {FILTERS.map((f, i) => (
           <button
             key={f.label}
@@ -89,7 +88,7 @@ export function WalletScreen() {
 
       <section className="mt-3" aria-label="Transactions">
         {transactions.isLoading ? (
-          <div className="space-y-2 px-gutter lg:px-6">
+          <div className="space-y-2">
             {Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-16 w-full rounded-xl" />
             ))}
@@ -103,14 +102,17 @@ export function WalletScreen() {
             hint={filterIndex === 0 ? 'Fund your account to start trading.' : undefined}
             action={
               filterIndex === 0 && !isDemo ? (
-                <Button variant="outline" size="sm" onClick={() => setDepositOpen(true)}>
+                <Button variant="outline" size="sm" onClick={overlay.deposit}>
                   Deposit
                 </Button>
               ) : undefined
             }
           />
         ) : (
-          <ul className="divide-y divide-hairline lg:mx-6 lg:overflow-hidden lg:rounded-card lg:border lg:border-border lg:bg-surface">
+          // The rows bring their own side padding, so the list cancels the
+          // panel's to sit edge to edge: a row's hover and a pending deposit's
+          // amber edge both want the full width.
+          <ul className="-mx-5 divide-y divide-hairline lg:-mx-4">
             {pending.map((t) => (
               <li key={t.id}>
                 <TransactionRow transaction={t} onSelect={() => setDetail(t)} pinned />
@@ -124,24 +126,6 @@ export function WalletScreen() {
           </ul>
         )}
       </section>
-
-      <DepositSheet
-        open={depositOpen}
-        onOpenChange={setDepositOpen}
-        account={account}
-        realAccount={realAccount}
-        onSwitchToReal={() => {
-          if (realAccount) setActiveAccount(realAccount.id)
-          setDepositOpen(false)
-        }}
-      />
-
-      <WithdrawSheet
-        open={withdrawOpen}
-        onOpenChange={setWithdrawOpen}
-        account={account}
-        wallet={wallet.data}
-      />
 
       <TransactionDetail transaction={detail} onClose={() => setDetail(null)} />
     </div>

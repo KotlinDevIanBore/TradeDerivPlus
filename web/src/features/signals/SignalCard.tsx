@@ -4,6 +4,7 @@ import { ConfidenceBar } from '@/components/ConfidenceBar'
 import { DirectionBadge } from '@/components/DirectionBadge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { MAIN_SURFACE } from '@/features/shell/usePanel'
 import { cn } from '@/lib/cn'
 import { percent, price, relativeTime } from '@/lib/format'
 import type { Signal } from '@/types'
@@ -16,9 +17,9 @@ export function isExpired(signal: Signal): boolean {
 }
 
 /**
- * Deep link to the Trade screen with the signal applied. An expired signal
- * passes its levels but not its entry price, so the ticket prices from the
- * live feed and warns the user.
+ * Deep link to the surface with the signal applied. An expired signal passes
+ * its levels but not its entry price, so the ticket prices from the live feed
+ * and warns the user.
  */
 export function signalHref(signal: Signal): string {
   const params = new URLSearchParams({
@@ -28,14 +29,28 @@ export function signalHref(signal: Signal): string {
   if (signal.stop_loss) params.set('sl', signal.stop_loss)
   if (signal.take_profit) params.set('tp', signal.take_profit)
   if (isExpired(signal)) params.set('expired', '1')
-  return `/trade?${params.toString()}`
+  return `${MAIN_SURFACE}?${params.toString()}`
 }
 
-function Level({ label, value, pipSize }: { label: string; value: string | null; pipSize: number }) {
+function Level({
+  label,
+  value,
+  pipSize,
+  compact,
+}: {
+  label: string
+  value: string | null
+  pipSize: number
+  compact?: boolean
+}) {
   return (
     <div>
       <p className="text-meta text-muted">{label}</p>
-      <p className="mt-0.5 text-body tnum text-text">{value ? price(value, pipSize) : '—'}</p>
+      {/* A five-figure price in three columns of a 300px panel needs the
+          smaller size, or the three of them touch. */}
+      <p className={cn('mt-0.5 tnum text-text', compact ? 'text-meta' : 'text-body')}>
+        {value ? price(value, pipSize) : '—'}
+      </p>
     </div>
   )
 }
@@ -74,10 +89,20 @@ export function SignalCard({
 
       <ConfidenceBar confidence={signal.confidence} className="mt-3" />
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <Level label="Entry" value={signal.entry_price} pipSize={signal.pip_size} />
-        <Level label="Stop loss" value={signal.stop_loss} pipSize={signal.pip_size} />
-        <Level label="Take profit" value={signal.take_profit} pipSize={signal.pip_size} />
+      <div className={cn('mt-4 grid grid-cols-3', compact ? 'gap-2' : 'gap-3')}>
+        <Level label="Entry" value={signal.entry_price} pipSize={signal.pip_size} compact={compact} />
+        <Level
+          label="Stop loss"
+          value={signal.stop_loss}
+          pipSize={signal.pip_size}
+          compact={compact}
+        />
+        <Level
+          label="Take profit"
+          value={signal.take_profit}
+          pipSize={signal.pip_size}
+          compact={compact}
+        />
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-2">
