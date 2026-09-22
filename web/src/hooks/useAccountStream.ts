@@ -4,10 +4,18 @@ import { createSocket } from '@/lib/socket'
 import { useSessionStore } from '@/store/session'
 import { dec } from '@/lib/money'
 import { queryKeys } from '@/lib/queryKeys'
-import type { Trade, Wallet } from '@/types'
+import type { DigitContract, Trade, Wallet } from '@/types'
 
 export interface AccountEvent {
-  type: 'wallet' | 'transaction' | 'trade_opened' | 'trade_closed' | 'kyc' | 'account'
+  type:
+    | 'wallet'
+    | 'transaction'
+    | 'trade_opened'
+    | 'trade_closed'
+    | 'digit_opened'
+    | 'digit_settled'
+    | 'kyc'
+    | 'account'
   payload: unknown
 }
 
@@ -23,6 +31,11 @@ export interface TransactionEvent {
 export interface TradeClosedEvent {
   trade: Trade
   reason: 'manual' | 'stop_loss' | 'take_profit'
+}
+
+export interface DigitSettledEvent {
+  contract: DigitContract
+  reason: string
 }
 
 /**
@@ -96,6 +109,21 @@ export function useAccountStream(accountId: string | null, onEvent?: (event: Acc
               queryClient.invalidateQueries({ queryKey: queryKeys.tradeSummary(accountId) })
             }
             break
+
+          case 'digit_opened':
+          case 'digit_settled': {
+            const payload = event.payload as { contract?: { account_id?: string }; account_id?: string }
+            const id =
+              payload.contract?.account_id ??
+              payload.account_id ??
+              accountId
+            if (id) {
+              queryClient.invalidateQueries({ queryKey: queryKeys.digitContracts(id) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.wallet(id) })
+              queryClient.invalidateQueries({ queryKey: queryKeys.transactions(id) })
+            }
+            break
+          }
         }
       },
       onStatus: () => {
