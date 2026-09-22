@@ -1,16 +1,5 @@
-import { Link, NavLink } from 'react-router-dom'
-import {
-  ArrowDownToLine,
-  Bot,
-  Briefcase,
-  CandlestickChart,
-  ChevronDown,
-  History,
-  Menu,
-  TrendingUp,
-  User as UserIcon,
-  type LucideIcon,
-} from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowDownToLine, ChevronDown, Menu, TrendingUp } from 'lucide-react'
 import { AccountPill } from '@/components/AccountPill'
 import { ConnectionDot } from '@/components/ConnectionDot'
 import { Money } from '@/components/Money'
@@ -18,32 +7,19 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { cn } from '@/lib/cn'
 import type { Account, Wallet } from '@/types'
-import { MAIN_SURFACE, usePanel, type PanelName } from './usePanel'
+import { PANEL_ITEMS } from './panelItems'
+import { MAIN_SURFACE, PANELS, usePanel } from './usePanel'
 
 /**
- * A row item is either somewhere to go or a panel to toggle, and the two are
- * different enough to be different elements: a panel opens beside what you are
- * looking at, so it is a button that says pressed, not a link that says page.
+ * The row, which is now panels only. Trade left it when trade became the page:
+ * a link to where you already are is not a destination, and the logo is the
+ * way back to a clean surface. Account is a panel too, but it sits at the far
+ * right with the identity controls rather than in the row.
  */
-type NavItem = { label: string; icon: LucideIcon } & (
-  | { to: string; panel?: never }
-  | { panel: PanelName; to?: never }
-)
+const row = PANELS.filter((name) => name !== 'account')
+const AccountIcon = PANEL_ITEMS.account.icon
 
-/**
- * Desktop destinations, in the row rather than down a sidebar.
- *
- * Trade is here only until it becomes the surface everything else sits on, at
- * which point the logo is the way back to it and this entry goes away.
- */
-const items: NavItem[] = [
-  { panel: 'positions', label: 'Positions', icon: Briefcase },
-  { to: MAIN_SURFACE, label: 'Trade', icon: CandlestickChart },
-  { panel: 'history', label: 'History', icon: History },
-  { panel: 'signals', label: 'Signals', icon: Bot },
-]
-
-/** One treatment for the row, whether the item is a link or a panel toggle. */
+/** One treatment for every toggle in the bar. */
 const item = (active: boolean) =>
   cn(
     'flex items-center gap-2 rounded-lg px-3 py-2 text-body font-medium transition-colors',
@@ -79,7 +55,13 @@ export function TopBar({
           <Menu className="h-6 w-6" aria-hidden />
         </button>
 
-        <Link to="/" className="flex shrink-0 items-center gap-2" aria-label="TradeDerivPlus home">
+        {/* The way back to a clean surface, which is what the Trade item in
+            the row used to be for. */}
+        <Link
+          to={MAIN_SURFACE}
+          className="flex shrink-0 items-center gap-2"
+          aria-label="TradeDerivPlus home"
+        >
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent">
             <TrendingUp className="h-4 w-4 text-white" aria-hidden />
           </span>
@@ -88,9 +70,11 @@ export function TopBar({
 
         <nav aria-label="Main" className="hidden lg:block">
           <ul className="flex items-center gap-1">
-            {items.map(({ to, panel: name, label, icon: Icon }) => (
-              <li key={label}>
-                {name ? (
+            {row.map((name) => {
+              const { label, icon: Icon } = PANEL_ITEMS[name]
+
+              return (
+                <li key={name}>
                   <button
                     type="button"
                     onClick={() => panel.toggle(name)}
@@ -100,22 +84,9 @@ export function TopBar({
                     <Icon className="h-4 w-4" aria-hidden />
                     {label}
                   </button>
-                ) : (
-                  <NavLink
-                    to={to!}
-                    className={({ isActive }) =>
-                      // Trade is the surface the panels sit on, so it stops
-                      // claiming to be the active thing while one is open.
-                      // Two lit items read as two places to be.
-                      item(isActive && !(to === MAIN_SURFACE && panel.panel !== null))
-                    }
-                  >
-                    <Icon className="h-4 w-4" aria-hidden />
-                    {label}
-                  </NavLink>
-                )}
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         </nav>
 
@@ -160,14 +131,13 @@ export function TopBar({
             <span className="hidden min-[400px]:inline">Deposit</span>
           </Button>
 
-          {/* The icon opens the Account panel rather than going anywhere, so
-              it says pressed like the rest of the row. Its label is the panel's
-              name, which is also how the panel is found and closed. */}
+          {/* Account is a panel like the others, but it belongs beside the
+              account pill rather than in the row. */}
           <button
             type="button"
             onClick={() => panel.toggle('account')}
             aria-pressed={panel.panel === 'account'}
-            aria-label="Account"
+            aria-label={PANEL_ITEMS.account.label}
             className={cn(
               'hidden rounded-lg p-1.5 transition-colors lg:block',
               panel.panel === 'account'
@@ -175,7 +145,7 @@ export function TopBar({
                 : 'text-muted hover:bg-surface hover:text-text',
             )}
           >
-            <UserIcon className="h-5 w-5" aria-hidden />
+            <AccountIcon className="h-5 w-5" aria-hidden />
           </button>
         </div>
       </div>

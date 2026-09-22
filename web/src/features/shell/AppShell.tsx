@@ -19,21 +19,22 @@ import { useIsAuthenticated, useSessionStore } from '@/store/session'
 import { AccountSwitcher } from './AccountSwitcher'
 import { NavDrawer } from './NavDrawer'
 import { overlay, useOverlayOpen } from './overlays'
+import { PANEL_ITEMS } from './panelItems'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
 import { usePanel, type PanelName } from './usePanel'
 
 /**
- * What each panel is called and what is inside it. One place, so adding a
- * panel is an entry here and a name in PANELS rather than another branch in
- * the shell's markup.
+ * What is inside each panel. One place, so adding a panel is an entry here, a
+ * name in PANELS and a label in PANEL_ITEMS -- which is also where the title
+ * comes from, so a panel's header cannot drift from what the chrome calls it.
  */
-const panels: Record<PanelName, { title: string; content: React.ReactNode }> = {
-  positions: { title: 'Positions', content: <PositionsPanel /> },
-  history: { title: 'History', content: <HistoryPanel /> },
-  signals: { title: 'Signals', content: <SignalsPanel /> },
-  account: { title: 'Account', content: <AccountPanel /> },
+const panels: Record<PanelName, React.ReactNode> = {
+  positions: <PositionsPanel />,
+  history: <HistoryPanel />,
+  signals: <SignalsPanel />,
+  account: <AccountPanel />,
 }
 
 /**
@@ -165,9 +166,9 @@ export function AppShell() {
         <Panel
           open={panel !== null}
           onClose={closePanel}
-          title={panel ? panels[panel].title : ''}
+          title={panel ? PANEL_ITEMS[panel].label : ''}
         >
-          {panel ? panels[panel].content : null}
+          {panel ? panels[panel] : null}
         </Panel>
 
         {/* The surface takes the whole window. The 1200px reading width that
