@@ -104,22 +104,19 @@ export function AppShell() {
       )
     }
 
-    // Temporary until Phase 3 Positions/History show digit contracts.
+    // Soft confirmation — Positions/History also update; keep toast brief.
     if (event.type === 'digit_settled') {
       const { contract, reason } = event.payload as DigitSettledEvent
       if (reason === 'auto_void' || contract.status === 'void') {
-        toast.info(`${contract.symbol_code} voided`, 'Stake refunded — no settlement tick')
+        toast.info(`${contract.symbol_code} voided`, 'Stake refunded')
         return
       }
       if (contract.status === 'won') {
-        toast.success(
-          `${contract.symbol_code} won`,
-          `${money(contract.potential_payout)} paid · ${signedMoney(contract.pnl)}`,
-        )
+        toast.success(`${contract.symbol_code} won`, signedMoney(contract.pnl))
         return
       }
       if (contract.status === 'lost') {
-        toast.info(`${contract.symbol_code} lost`, `${signedMoney(contract.pnl)} · stake forfeited`)
+        toast.info(`${contract.symbol_code} lost`, signedMoney(contract.pnl))
       }
     }
   })
