@@ -18,11 +18,11 @@ await page.getByLabel('Password', { exact: true }).fill('hunter2024')
 await page.getByLabel('Confirm password').fill('hunter2024')
 await page.getByRole('checkbox').check()
 await page.getByRole('button', { name: 'Create account' }).click()
-await page.locator('section[aria-label="Balance"]').waitFor({ timeout: 30_000 })
+await page.getByRole('button', { name: 'Switch account' }).waitFor({ timeout: 30_000 })
 
 for (const width of WIDTHS) {
   await page.setViewportSize({ width, height: 900 })
-  await page.goto(`http://localhost:5173/trade${withPanel ? '?panel=positions' : '?panel=none'}`)
+  await page.goto(`http://localhost:5173/${withPanel ? '?panel=positions' : '?panel=none'}`)
   await page.locator('.recharts-wrapper').waitFor({ timeout: 30_000 })
   await page.waitForTimeout(1200)
 
@@ -30,7 +30,7 @@ for (const width of WIDTHS) {
     const round = (n) => Math.round(n)
     const chart = document.querySelector('.recharts-wrapper')
     const panel = document.querySelector('aside[aria-label="Positions"]')
-    const ticket = document.querySelector('form')
+    const ticket = [...document.querySelectorAll('div')].find((d) => String(d.className).includes('rounded-t-3xl'))
     return {
       chart: chart ? round(chart.getBoundingClientRect().width) : null,
       panel: panel ? round(panel.getBoundingClientRect().width) : 0,
@@ -43,5 +43,35 @@ for (const width of WIDTHS) {
       `chart ${String(measured.chart).padStart(4)}  ticket ${measured.ticket}`,
   )
 }
+
+// And the phone, vertically: with Home gone the surface is the landing, so
+// what matters is whether the chart and the ticket fit in one screenful.
+await page.setViewportSize({ width: 412, height: 915 })
+await page.goto('http://localhost:5173/')
+await page.locator('.recharts-wrapper').waitFor({ timeout: 30_000 })
+await page.waitForTimeout(1200)
+
+const tall = await page.evaluate(() => {
+  const round = (n) => Math.round(n)
+  const box = (el) => (el ? round(el.getBoundingClientRect().height) : null)
+  const chart = document.querySelector('.recharts-wrapper')
+  const ticket = [...document.querySelectorAll('div')].find((d) => String(d.className).includes('rounded-t-3xl'))
+  return {
+    viewport: window.innerHeight,
+    document: round(document.documentElement.scrollHeight),
+    topbar: box(document.querySelector('header')),
+    chart: box(chart),
+    chartBottom: chart ? round(chart.getBoundingClientRect().bottom) : null,
+    ticketTop: ticket ? round(ticket.getBoundingClientRect().top) : null,
+    tabbar: box(document.querySelector('nav[aria-label="Bottom"]')),
+  }
+})
+
+console.log(
+  `\n412x915 phone  viewport ${tall.viewport}  document ${tall.document}  ` +
+    `topbar ${tall.topbar}  chart ${tall.chart}  tabbar ${tall.tabbar}\n` +
+    `               chart ends at ${tall.chartBottom}, ticket starts at ${tall.ticketTop}, ` +
+    `so ${tall.ticketTop - tall.chartBottom}px between them`,
+)
 
 await browser.close()
