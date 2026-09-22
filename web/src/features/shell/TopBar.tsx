@@ -5,18 +5,12 @@ import { ConnectionDot } from '@/components/ConnectionDot'
 import { Money } from '@/components/Money'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { useMe } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
 import type { Account, Wallet } from '@/types'
-import { PANEL_ITEMS } from './panelItems'
-import { MAIN_SURFACE, PANELS, usePanel } from './usePanel'
+import { chromePanels, PANEL_ITEMS } from './panelItems'
+import { MAIN_SURFACE, usePanel } from './usePanel'
 
-/**
- * The row, which is now panels only. Trade left it when trade became the page:
- * a link to where you already are is not a destination, and the logo is the
- * way back to a clean surface. Account is a panel too, but it sits at the far
- * right with the identity controls rather than in the row.
- */
-const row = PANELS.filter((name) => name !== 'account')
 const AccountIcon = PANEL_ITEMS.account.icon
 
 /** One treatment for every toggle in the bar. */
@@ -42,6 +36,11 @@ export function TopBar({
   onDeposit: () => void
 }) {
   const panel = usePanel()
+  const me = useMe()
+  // Account sits beside the pill, not in the main row.
+  const row = chromePanels(Boolean(me.data?.digit_contracts_enabled)).filter(
+    (name) => name !== 'account',
+  )
 
   return (
     <header className="sticky top-0 z-30 border-b border-hairline bg-bg/90 backdrop-blur-lg">

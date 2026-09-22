@@ -1,5 +1,6 @@
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
+import { useMe } from '@/hooks/useQueries'
 import { mergeParams } from '@/lib/searchParams'
 
 /**
@@ -24,11 +25,21 @@ const CLOSED = 'none'
 /** Which panel a URL asks for, given who is asking. Pure, so it can be tested. */
 export function resolvePanel(
   raw: string | null,
-  { desktop, onMainSurface }: { desktop: boolean; onMainSurface: boolean },
+  {
+    desktop,
+    onMainSurface,
+    hideSignals = false,
+  }: { desktop: boolean; onMainSurface: boolean; hideSignals?: boolean },
 ): PanelName | null {
   if (!onMainSurface) return null
   if (raw === CLOSED) return null
-  if (raw && (PANELS as readonly string[]).includes(raw)) return raw as PanelName
+  if (raw && (PANELS as readonly string[]).includes(raw)) {
+    const name = raw as PanelName
+    if (hideSignals && name === 'signals') {
+      return desktop ? 'positions' : null
+    }
+    return name
+  }
 
   // An unknown value falls back to the default rather than to nothing, so a
   // stale link from a future phase lands somewhere usable instead of on an
@@ -50,9 +61,11 @@ export function usePanel() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const desktop = useIsDesktop()
+  const me = useMe()
+  const hideSignals = Boolean(me.data?.digit_contracts_enabled)
 
   const onMainSurface = pathname === MAIN_SURFACE
-  const panel = resolvePanel(params.get('panel'), { desktop, onMainSurface })
+  const panel = resolvePanel(params.get('panel'), { desktop, onMainSurface, hideSignals })
 
   const href = (name: PanelName) => `${MAIN_SURFACE}?panel=${name}`
 

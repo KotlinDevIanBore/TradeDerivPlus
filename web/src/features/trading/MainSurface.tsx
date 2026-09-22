@@ -1,5 +1,5 @@
 import { Spinner } from '@/components/Spinner'
-import { DigitSurfaceStub } from '@/features/trading/DigitSurfaceStub'
+import { DigitTradeScreen } from '@/features/trading/DigitTradeScreen'
 import { TradeScreen } from '@/features/trading/TradeScreen'
 import { useMe } from '@/hooks/useQueries'
 
@@ -20,7 +20,7 @@ export function MainSurface() {
   }
 
   if (me.data?.digit_contracts_enabled) {
-    return <DigitSurfaceStub />
+    return <DigitTradeScreen />
   }
 
   return <TradeScreen />

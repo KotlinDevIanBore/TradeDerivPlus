@@ -1,5 +1,5 @@
 import { Bot, Briefcase, Receipt, User, type LucideIcon } from 'lucide-react'
-import type { PanelName } from './usePanel'
+import { PANELS, type PanelName } from './usePanel'
 
 /**
  * What each panel is called and what it looks like in the chrome.
@@ -14,4 +14,14 @@ export const PANEL_ITEMS: Record<PanelName, { label: string; icon: LucideIcon }>
   history: { label: 'History', icon: Receipt },
   signals: { label: 'Signals', icon: Bot },
   account: { label: 'Account', icon: User },
+}
+
+/**
+ * Panels shown in the chrome. Signals stay in PANEL_ITEMS and the panel map
+ * but are hidden when digit contracts are on — their CFD entry/SL/TP shape
+ * does not apply.
+ */
+export function chromePanels(digitContractsEnabled: boolean): readonly PanelName[] {
+  if (!digitContractsEnabled) return PANELS
+  return PANELS.filter((name) => name !== 'signals')
 }

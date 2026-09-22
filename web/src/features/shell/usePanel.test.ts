@@ -36,4 +36,9 @@ describe('resolvePanel', () => {
     expect(resolvePanel('positions', { desktop: true, onMainSurface: false })).toBe(null)
     expect(resolvePanel(null, { desktop: true, onMainSurface: false })).toBe(null)
   })
+
+  it('hides Signals when digit contracts are on', () => {
+    expect(resolvePanel('signals', { ...desktop, hideSignals: true })).toBe('positions')
+    expect(resolvePanel('signals', { ...phone, hideSignals: true })).toBe(null)
+  })
 })

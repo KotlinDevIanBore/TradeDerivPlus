@@ -60,7 +60,7 @@ export function DigitTradeScreen() {
   const change = useMemo(() => windowChange(history, range), [history, range])
 
   const openOnSymbol = (openDigits.data?.items ?? []).filter((c) => c.symbol_code === activeCode)
-  // Chart entry marker is wired in Step 7.
+  // Entry marker on the chart lands in Step 7.
   void openOnSymbol
 
   useEffect(() => {
