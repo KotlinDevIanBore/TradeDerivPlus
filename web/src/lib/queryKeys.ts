@@ -15,6 +15,10 @@ export const queryKeys = {
       ? (['trades', accountId] as const)
       : (['trades', accountId, status] as const),
   tradeSummary: (accountId: string) => ['tradeSummary', accountId] as const,
+  digitContracts: (accountId: string, status?: string) =>
+    status === undefined
+      ? (['digitContracts', accountId] as const)
+      : (['digitContracts', accountId, status] as const),
   symbols: () => ['symbols'] as const,
   signals: (symbol?: string) => (symbol ? (['signals', symbol] as const) : (['signals'] as const)),
   rate: () => ['rate'] as const,

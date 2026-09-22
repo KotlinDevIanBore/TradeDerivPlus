@@ -12,9 +12,46 @@ export type TxType =
   | 'withdrawal'
   | 'trade_open'
   | 'trade_close'
+  | 'digit_open'
+  | 'digit_settle'
   | 'bonus_credit'
   | 'admin_adjustment'
 export type SymbolCategory = 'volatility' | 'boom_crash' | 'forex'
+
+export type DigitContractType = 'even_odd' | 'matches_differs' | 'over_under'
+export type DigitContractStatus = 'open' | 'won' | 'lost' | 'void'
+
+export interface DigitSelection {
+  mode?: 'match' | 'differ'
+  digit?: number
+  parity?: 'even' | 'odd'
+  side?: 'over' | 'under'
+  barrier?: number
+}
+
+export interface DigitContract {
+  id: string
+  account_id: string
+  symbol_id: string
+  contract_type: DigitContractType
+  selection: DigitSelection
+  stake: string
+  payout_ratio: string
+  potential_payout: string
+  entry_price: string
+  entry_digit: number
+  entry_tick_epoch: number
+  status: DigitContractStatus
+  settlement_price: string | null
+  settlement_digit: number | null
+  settled_at: string | null
+  pnl: string | null
+  opened_at: string
+  void_after: string
+  symbol_code: string
+  symbol_name: string
+  pip_size: number
+}
 
 export interface User {
   id: string
