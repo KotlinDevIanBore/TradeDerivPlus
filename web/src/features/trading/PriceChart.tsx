@@ -28,6 +28,7 @@ export function PriceChart({
   range,
   stopLoss,
   takeProfit,
+  entryPrice,
   stale,
   className,
 }: {
@@ -36,6 +37,8 @@ export function PriceChart({
   range: ChartRange
   stopLoss?: string | null
   takeProfit?: string | null
+  /** Open digit contract entry — horizontal marker on the price scale. */
+  entryPrice?: string | null
   stale?: boolean
   className?: string
 }) {
@@ -58,7 +61,7 @@ export function PriceChart({
   // stay visible when they sit just outside the traded range.
   const domain = useMemo<[number, number]>(() => {
     const values = data.map((d) => d.value)
-    for (const level of [stopLoss, takeProfit]) {
+    for (const level of [stopLoss, takeProfit, entryPrice]) {
       if (level) values.push(dec(level).toNumber())
     }
     if (values.length === 0) return [0, 1]
@@ -67,7 +70,7 @@ export function PriceChart({
     const max = Math.max(...values)
     const pad = (max - min || max * 0.001) * 0.15
     return [min - pad, max + pad]
-  }, [data, stopLoss, takeProfit])
+  }, [data, stopLoss, takeProfit, entryPrice])
 
   /**
    * The scale only needs enough precision to tell its own ticks apart, which is
@@ -143,6 +146,16 @@ export function PriceChart({
               strokeDasharray="4 4"
               strokeWidth={1}
               label={{ value: 'TP', position: 'insideLeft', fill: chartTheme.up, fontSize: 10 }}
+            />
+          ) : null}
+
+          {entryPrice ? (
+            <ReferenceLine
+              y={dec(entryPrice).toNumber()}
+              stroke={chartTheme.axis}
+              strokeDasharray="4 4"
+              strokeWidth={1}
+              label={{ value: 'Entry', position: 'insideLeft', fill: chartTheme.axis, fontSize: 10 }}
             />
           ) : null}
 

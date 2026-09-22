@@ -60,8 +60,7 @@ export function DigitTradeScreen() {
   const change = useMemo(() => windowChange(history, range), [history, range])
 
   const openOnSymbol = (openDigits.data?.items ?? []).filter((c) => c.symbol_code === activeCode)
-  // Entry marker on the chart lands in Step 7.
-  void openOnSymbol
+  const entryMarker = openOnSymbol[0]?.entry_price
 
   useEffect(() => {
     setWaitedForPrice(false)
@@ -160,6 +159,7 @@ export function DigitTradeScreen() {
               ticks={history}
               pipSize={symbol?.pip_size ?? 4}
               range={range}
+              entryPrice={entryMarker}
               stale={stale}
             />
           )}
