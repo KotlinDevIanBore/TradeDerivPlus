@@ -24,6 +24,8 @@ export interface User {
   kyc_status: KYCStatus
   created_at: string
   updated_at: string
+  /** Runtime flag from app_settings — swaps the main trading surface. Absent on login/register payloads until /me is fetched. */
+  digit_contracts_enabled?: boolean
 }
 
 export type AccountStatus = 'active' | 'frozen'

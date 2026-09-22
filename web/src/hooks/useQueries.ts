@@ -53,7 +53,10 @@ export function useMe() {
       return user
     },
     enabled,
-    staleTime: 300_000,
+    // Short enough that a SQL flag flip shows up without a long wait; matches
+    // the API's settings cache TTL so we do not hammer the DB.
+    staleTime: 10_000,
+    refetchInterval: 10_000,
   })
 }
 

@@ -8,7 +8,7 @@ import { LoginScreen } from '@/features/auth/LoginScreen'
 import { RegisterScreen } from '@/features/auth/RegisterScreen'
 import { AppShell } from '@/features/shell/AppShell'
 import { PanelRedirect, SurfaceRedirect } from '@/features/shell/redirects'
-import { TradeScreen } from '@/features/trading/TradeScreen'
+import { MainSurface } from '@/features/trading/MainSurface'
 
 // The admin console is a separate product with its own session and layout.
 // Loading it lazily keeps it out of the user app's bundle entirely.
@@ -54,7 +54,7 @@ export default function App() {
           <Route path="/register" element={<RegisterScreen />} />
 
           <Route element={<AppShell />}>
-            <Route path="/" element={<TradeScreen />} />
+            <Route path="/" element={<MainSurface />} />
             <Route path="/trade" element={<SurfaceRedirect />} />
             <Route
               path="/portfolio"
