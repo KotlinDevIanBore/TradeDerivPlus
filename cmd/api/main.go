@@ -95,6 +95,11 @@ func run() error {
 	admin.OnAction(observability.RecordAdminAction)
 	wallet.OnDepositSettled(observability.RecordDeposit)
 
+	settings := service.NewSettingsService(store, cfg.DigitContractsEnabled, log)
+	if err := settings.Bootstrap(ctx); err != nil {
+		return err
+	}
+
 	go feed.Run(ctx)
 	trading.Start(ctx)
 	go signals.Run(ctx)
@@ -105,7 +110,7 @@ func run() error {
 
 	// --- HTTP ---------------------------------------------------------------
 	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa}
-	deps.Handler.Auth = handlers.NewAuthHandler(auth, cfg)
+	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
 	deps.Handler.Trade = handlers.NewTradeHandler(trading)

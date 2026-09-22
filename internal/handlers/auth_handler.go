@@ -7,16 +7,18 @@ import (
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/config"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/models"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
 )
 
 type AuthHandler struct {
-	auth *service.AuthService
-	cfg  *config.Config
+	auth     *service.AuthService
+	settings *service.SettingsService
+	cfg      *config.Config
 }
 
-func NewAuthHandler(auth *service.AuthService, cfg *config.Config) *AuthHandler {
-	return &AuthHandler{auth: auth, cfg: cfg}
+func NewAuthHandler(auth *service.AuthService, settings *service.SettingsService, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{auth: auth, settings: settings, cfg: cfg}
 }
 
 // authResponse is what the client receives. The refresh token is deliberately
@@ -127,12 +129,27 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 }
 
 // Me backs the profile screen, the deposit phone prefill and the withdraw
-// KYC gate (spec gap G9).
+// KYC gate (spec gap G9). It also carries digit_contracts_enabled so the web
+// app can swap the trading surface without a separate config endpoint.
 func (h *AuthHandler) Me(c *gin.Context) {
 	user, err := h.auth.Me(c.Request.Context(), middleware.UserID(c))
 	if err != nil {
 		fail(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, user)
+	digit, err := h.settings.DigitContractsEnabled(c.Request.Context())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, meResponse{
+		User:                    *user,
+		DigitContractsEnabled: digit,
+	})
+}
+
+// meResponse is the user profile plus the runtime trading-surface flag.
+type meResponse struct {
+	models.User
+	DigitContractsEnabled bool `json:"digit_contracts_enabled"`
 }
