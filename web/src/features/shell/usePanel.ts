@@ -9,8 +9,8 @@ import { mergeParams } from '@/lib/searchParams'
  */
 export const MAIN_SURFACE = '/trade'
 
-/** Phase 3 adds signals and account alongside these. */
-export const PANELS = ['positions', 'history'] as const
+/** Phase 3 adds account alongside these. */
+export const PANELS = ['positions', 'history', 'signals'] as const
 export type PanelName = (typeof PANELS)[number]
 
 /**

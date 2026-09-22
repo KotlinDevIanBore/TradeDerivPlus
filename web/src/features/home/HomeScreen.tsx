@@ -10,6 +10,7 @@ import {
 } from '@/features/signals/SignalCard'
 import { overlay } from '@/features/shell/overlays'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
+import { usePanel } from '@/features/shell/usePanel'
 import { useWatchSymbols } from '@/hooks/usePriceFeed'
 import { useSignals, useTransactions, useTrades, useWallet } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
@@ -27,6 +28,7 @@ import { RecentActivity } from './RecentActivity'
  */
 export function HomeScreen() {
   const { account, accountId, accounts } = useActiveAccount()
+  const { href: panelHref } = usePanel()
   const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
   const user = useSessionStore((s) => s.user)
 
@@ -72,7 +74,7 @@ export function HomeScreen() {
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-card font-semibold">Latest signal</h2>
             <Link
-              to="/signals"
+              to={panelHref('signals')}
               className="flex items-center gap-0.5 text-meta font-medium text-accent hover:underline"
             >
               See all

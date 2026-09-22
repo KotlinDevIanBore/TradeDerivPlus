@@ -109,10 +109,10 @@ export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange:
               onNavigate={close}
             />
             <Destination
-              to="/signals"
+              to={href('signals')}
               label="Signals"
               icon={Bot}
-              active={pathname === '/signals'}
+              active={panel === 'signals'}
               onNavigate={close}
             />
             <Destination

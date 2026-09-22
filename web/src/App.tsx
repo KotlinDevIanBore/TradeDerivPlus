@@ -10,7 +10,6 @@ import { HomeScreen } from '@/features/home/HomeScreen'
 import { ProfileScreen } from '@/features/profile/ProfileScreen'
 import { AppShell } from '@/features/shell/AppShell'
 import { PanelRedirect } from '@/features/shell/redirects'
-import { SignalsScreen } from '@/features/signals/SignalsScreen'
 import { TradeScreen } from '@/features/trading/TradeScreen'
 
 // The admin console is a separate product with its own session and layout.
@@ -64,7 +63,7 @@ export default function App() {
               element={<PanelRedirect panel="positions" carry={['tab']} />}
             />
             <Route path="/wallet" element={<PanelRedirect panel="history" />} />
-            <Route path="/signals" element={<SignalsScreen />} />
+            <Route path="/signals" element={<PanelRedirect panel="signals" />} />
             <Route path="/profile" element={<ProfileScreen />} />
           </Route>
 

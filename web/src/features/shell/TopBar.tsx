@@ -40,7 +40,7 @@ const items: NavItem[] = [
   { panel: 'positions', label: 'Positions', icon: Briefcase },
   { to: MAIN_SURFACE, label: 'Trade', icon: CandlestickChart },
   { panel: 'history', label: 'History', icon: History },
-  { to: '/signals', label: 'Signals', icon: Bot },
+  { panel: 'signals', label: 'Signals', icon: Bot },
 ]
 
 /** One treatment for the row, whether the item is a link or a panel toggle. */

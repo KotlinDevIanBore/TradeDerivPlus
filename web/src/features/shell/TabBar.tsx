@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Briefcase, CandlestickChart, Home, Receipt, type LucideIcon } from 'lucide-react'
+import { Bot, Briefcase, CandlestickChart, Home, Receipt, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { MAIN_SURFACE, usePanel } from './usePanel'
 
@@ -41,6 +41,12 @@ export function TabBar() {
       label: 'History',
       icon: Receipt,
       active: panel === 'history',
+    },
+    {
+      to: href('signals'),
+      label: 'Signals',
+      icon: Bot,
+      active: panel === 'signals',
     },
   ]
 

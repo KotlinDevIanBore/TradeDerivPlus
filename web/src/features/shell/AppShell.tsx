@@ -11,6 +11,7 @@ import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
 import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
+import { SignalsPanel } from '@/features/signals/SignalsPanel'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { HistoryPanel } from '@/features/wallet/HistoryPanel'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
@@ -31,6 +32,7 @@ import { MAIN_SURFACE, usePanel, type PanelName } from './usePanel'
 const panels: Record<PanelName, { title: string; content: React.ReactNode }> = {
   positions: { title: 'Positions', content: <PositionsPanel /> },
   history: { title: 'History', content: <HistoryPanel /> },
+  signals: { title: 'Signals', content: <SignalsPanel /> },
 }
 
 /**
