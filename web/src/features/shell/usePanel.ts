@@ -3,11 +3,10 @@ import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { mergeParams } from '@/lib/searchParams'
 
 /**
- * The route the panels sit over. Trade is still a route of its own in this
- * phase; in Phase 4 it becomes `/` and this constant follows it, which is why
- * nothing else in the app writes the path literally.
+ * The route the panels sit over, which is now the app's only screen. Nothing
+ * writes it literally, which is what made moving it here a one-line change.
  */
-export const MAIN_SURFACE = '/trade'
+export const MAIN_SURFACE = '/'
 
 export const PANELS = ['positions', 'history', 'signals', 'account'] as const
 export type PanelName = (typeof PANELS)[number]

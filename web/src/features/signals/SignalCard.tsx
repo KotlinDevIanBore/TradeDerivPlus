@@ -4,6 +4,7 @@ import { ConfidenceBar } from '@/components/ConfidenceBar'
 import { DirectionBadge } from '@/components/DirectionBadge'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { MAIN_SURFACE } from '@/features/shell/usePanel'
 import { cn } from '@/lib/cn'
 import { percent, price, relativeTime } from '@/lib/format'
 import type { Signal } from '@/types'
@@ -16,9 +17,9 @@ export function isExpired(signal: Signal): boolean {
 }
 
 /**
- * Deep link to the Trade screen with the signal applied. An expired signal
- * passes its levels but not its entry price, so the ticket prices from the
- * live feed and warns the user.
+ * Deep link to the surface with the signal applied. An expired signal passes
+ * its levels but not its entry price, so the ticket prices from the live feed
+ * and warns the user.
  */
 export function signalHref(signal: Signal): string {
   const params = new URLSearchParams({
@@ -28,7 +29,7 @@ export function signalHref(signal: Signal): string {
   if (signal.stop_loss) params.set('sl', signal.stop_loss)
   if (signal.take_profit) params.set('tp', signal.take_profit)
   if (isExpired(signal)) params.set('expired', '1')
-  return `/trade?${params.toString()}`
+  return `${MAIN_SURFACE}?${params.toString()}`
 }
 
 function Level({

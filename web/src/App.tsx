@@ -6,9 +6,8 @@ import { Spinner } from '@/components/Spinner'
 import { Toaster } from '@/components/ui/Toast'
 import { LoginScreen } from '@/features/auth/LoginScreen'
 import { RegisterScreen } from '@/features/auth/RegisterScreen'
-import { HomeScreen } from '@/features/home/HomeScreen'
 import { AppShell } from '@/features/shell/AppShell'
-import { PanelRedirect } from '@/features/shell/redirects'
+import { PanelRedirect, SurfaceRedirect } from '@/features/shell/redirects'
 import { TradeScreen } from '@/features/trading/TradeScreen'
 
 // The admin console is a separate product with its own session and layout.
@@ -55,8 +54,8 @@ export default function App() {
           <Route path="/register" element={<RegisterScreen />} />
 
           <Route element={<AppShell />}>
-            <Route path="/" element={<HomeScreen />} />
-            <Route path="/trade" element={<TradeScreen />} />
+            <Route path="/" element={<TradeScreen />} />
+            <Route path="/trade" element={<SurfaceRedirect />} />
             <Route
               path="/portfolio"
               element={<PanelRedirect panel="positions" carry={['tab']} />}

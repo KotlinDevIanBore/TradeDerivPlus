@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import { ApiError } from '@/api/client'
@@ -44,7 +43,6 @@ export function DepositSheet({
   realAccount: Account | null
   onSwitchToReal: () => void
 }) {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useSessionStore((s) => s.user)
   const rate = useRate()
@@ -261,21 +259,12 @@ export function DepositSheet({
             {money(settled?.amount)} is now in your balance.
           </p>
 
-          <div className="mt-6 space-y-2">
-            <Button
-              size="lg"
-              block
-              onClick={() => {
-                onOpenChange(false)
-                navigate('/trade')
-              }}
-            >
-              Start trading
-            </Button>
-            <Button variant="ghost" block onClick={() => onOpenChange(false)}>
-              Done
-            </Button>
-          </div>
+          {/* One button, because there is one thing to do: the chart is behind
+              this sheet, so closing it is starting to trade. There used to be
+              a second button that navigated there. */}
+          <Button size="lg" block className="mt-6" onClick={() => onOpenChange(false)}>
+            Start trading
+          </Button>
         </div>
       ) : null}
 
