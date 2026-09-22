@@ -26,7 +26,9 @@ test.describe('The admin console', () => {
     await expect(confirm).toBeEnabled()
     await confirm.click()
 
-    await expect(page.getByText('FROZEN')).toBeVisible()
+    // Exact, and in the badge's own casing: a loose match also finds the
+    // toast that says "Account NNNNNN frozen" while it is still on screen.
+    await expect(page.getByText('frozen', { exact: true })).toBeVisible()
 
     // The user, in their own browser, is refused and told why.
     const userContext = await browser.newContext()

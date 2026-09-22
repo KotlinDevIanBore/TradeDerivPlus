@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { ChevronRight } from 'lucide-react'
 import { DirectionBadge } from '@/components/DirectionBadge'
 import { Money } from '@/components/Money'
+import { usePanel } from '@/features/shell/usePanel'
 import { usePrice } from '@/store/market'
 import { pnl } from '@/lib/pnl'
 import type { Trade } from '@/types'
@@ -30,6 +31,8 @@ function Row({ trade }: { trade: Trade }) {
  * entirely when there are none, rather than showing an empty shell.
  */
 export function OpenPositionsSummary({ trades }: { trades: Trade[] }) {
+  const { href } = usePanel()
+
   if (trades.length === 0) return null
 
   return (
@@ -37,7 +40,7 @@ export function OpenPositionsSummary({ trades }: { trades: Trade[] }) {
       <div className="flex items-center justify-between">
         <h2 className="text-card font-semibold">Open positions</h2>
         <Link
-          to="/portfolio"
+          to={href('positions')}
           className="flex items-center gap-0.5 text-meta font-medium text-accent hover:underline"
         >
           View all

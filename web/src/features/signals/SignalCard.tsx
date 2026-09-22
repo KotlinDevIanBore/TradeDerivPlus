@@ -31,11 +31,25 @@ export function signalHref(signal: Signal): string {
   return `/trade?${params.toString()}`
 }
 
-function Level({ label, value, pipSize }: { label: string; value: string | null; pipSize: number }) {
+function Level({
+  label,
+  value,
+  pipSize,
+  compact,
+}: {
+  label: string
+  value: string | null
+  pipSize: number
+  compact?: boolean
+}) {
   return (
     <div>
       <p className="text-meta text-muted">{label}</p>
-      <p className="mt-0.5 text-body tnum text-text">{value ? price(value, pipSize) : '—'}</p>
+      {/* A five-figure price in three columns of a 300px panel needs the
+          smaller size, or the three of them touch. */}
+      <p className={cn('mt-0.5 tnum text-text', compact ? 'text-meta' : 'text-body')}>
+        {value ? price(value, pipSize) : '—'}
+      </p>
     </div>
   )
 }
@@ -74,10 +88,20 @@ export function SignalCard({
 
       <ConfidenceBar confidence={signal.confidence} className="mt-3" />
 
-      <div className="mt-4 grid grid-cols-3 gap-3">
-        <Level label="Entry" value={signal.entry_price} pipSize={signal.pip_size} />
-        <Level label="Stop loss" value={signal.stop_loss} pipSize={signal.pip_size} />
-        <Level label="Take profit" value={signal.take_profit} pipSize={signal.pip_size} />
+      <div className={cn('mt-4 grid grid-cols-3', compact ? 'gap-2' : 'gap-3')}>
+        <Level label="Entry" value={signal.entry_price} pipSize={signal.pip_size} compact={compact} />
+        <Level
+          label="Stop loss"
+          value={signal.stop_loss}
+          pipSize={signal.pip_size}
+          compact={compact}
+        />
+        <Level
+          label="Take profit"
+          value={signal.take_profit}
+          pipSize={signal.pip_size}
+          compact={compact}
+        />
       </div>
 
       <div className="mt-4 flex items-center justify-between gap-2">
