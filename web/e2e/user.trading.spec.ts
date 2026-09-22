@@ -1,18 +1,18 @@
 import { expect, test } from '@playwright/test'
-import { beginClosePosition, closePanel, goTo, newPhone, openPanel, register } from './helpers'
+import {
+  accountPill,
+  beginClosePosition,
+  closePanel,
+  newPhone,
+  openPanel,
+  register,
+} from './helpers'
 
 test.describe('A user trading', () => {
   test('registers, opens a position, and closes it with the balance adding up', async ({ page }) => {
+    // Signup lands on the surface with a funded demo account; register()
+    // asserts the pill it lands on.
     await register(page, newPhone())
-
-    // Signup lands on a usable demo account without a second round trip.
-    const balanceCard = page.locator('section[aria-label="Balance"]')
-    await expect(balanceCard.getByText('Total balance')).toBeVisible()
-    await expect(balanceCard.getByText('$10,000.00', { exact: true })).toBeVisible()
-    await expect(balanceCard.getByText('demo', { exact: true })).toBeVisible()
-
-    await goTo(page, 'Trade')
-    await page.waitForURL('**/trade*')
 
     // The ticket stays disabled until a live price arrives.
     const submit = page.getByRole('button', { name: /Buy R_75 for/ })
@@ -25,14 +25,10 @@ test.describe('A user trading', () => {
     await expect(page.getByText('Position opened')).toBeVisible()
     await expect(page.getByText('Your positions on R_75')).toBeVisible()
 
-    // The stake left the balance.
-    await goTo(page, 'Home')
-    await expect(
-      page.locator('section[aria-label="Balance"]').getByText('$9,900.00', { exact: true }),
-    ).toBeVisible()
+    // The stake left the balance. The pill is in the bar above the chart, so
+    // checking it no longer means leaving the page the trade was made on.
+    await expect(accountPill(page)).toContainText('$9,900.00')
 
-    // Positions is a panel over the chart now, not a screen to travel to.
-    await goTo(page, 'Trade')
     await openPanel(page, 'Positions')
     await beginClosePosition(page)
 
@@ -50,16 +46,15 @@ test.describe('A user trading', () => {
     await closePanel(page, 'Positions')
 
     // The stake plus its result came back, so the total is near where it was.
-    await goTo(page, 'Home')
-    const balance = await page.locator('section[aria-label="Balance"] p').nth(1).innerText()
-    const value = Number(balance.replace(/[$,]/g, ''))
+    // The pill also carries the account type and, on a desktop, its number.
+    const pill = await accountPill(page).innerText()
+    const value = Number(pill.match(/\$([\d,]+\.\d{2})/)![1].replace(/,/g, ''))
     expect(value).toBeGreaterThan(9_000)
     expect(value).toBeLessThan(11_000)
 
-    // Walking away and back must leave the feed alone. The screens visited
-    // above all want R_75 priced while the position is open, and a screen
+    // Opening and closing panels must leave the feed alone. The chart and the
+    // panel both want R_75 priced while the position is open, and a screen
     // letting go of a symbol used to close the socket for everyone.
-    await goTo(page, 'Trade')
     await expect(page.getByRole('button', { name: /Buy R_75 for/ })).toBeEnabled({
       timeout: 30_000,
     })
@@ -68,7 +63,6 @@ test.describe('A user trading', () => {
 
   test('refuses a stake larger than the balance, naming the limit', async ({ page }) => {
     await register(page, newPhone())
-    await page.goto('/trade')
 
     await expect(page.getByRole('button', { name: /Buy R_75 for/ })).toBeEnabled({ timeout: 30_000 })
     await page.getByLabel('Stake').fill('999999')

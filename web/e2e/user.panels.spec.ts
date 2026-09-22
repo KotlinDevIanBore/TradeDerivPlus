@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test'
-import { beginClosePosition, closePanel, newPhone, openPanel, panelOf, register } from './helpers'
+import {
+  beginClosePosition,
+  closePanel,
+  isWide,
+  newPhone,
+  openPanel,
+  panelOf,
+  register,
+} from './helpers'
 
 test.describe('The Positions panel', () => {
   test('arrives from an old link with its tab, and closes on back', async ({ page }) => {
@@ -8,7 +16,7 @@ test.describe('The Positions panel', () => {
     // The route Portfolio used to live at is a link somebody may have sent,
     // with the tab that made the link worth sending.
     await page.goto('/portfolio?tab=closed')
-    await page.waitForURL(/\/trade\?.*panel=positions/)
+    await page.waitForURL(/\/\?.*panel=positions/)
     expect(page.url()).toContain('tab=closed')
 
     const panel = panelOf(page, 'Positions')
@@ -30,7 +38,6 @@ test.describe('The Positions panel', () => {
 
   test('leaves the feed alone however often it is opened and closed', async ({ page }) => {
     await register(page, newPhone())
-    await page.goto('/trade')
 
     const ticket = page.getByRole('button', { name: /Buy R_75 for/ })
     await expect(ticket).toBeEnabled({ timeout: 30_000 })
@@ -52,7 +59,6 @@ test.describe('The Positions panel', () => {
     page,
   }) => {
     await register(page, newPhone())
-    await page.goto('/trade')
 
     await expect(page.getByRole('button', { name: /Buy R_75 for/ })).toBeEnabled({
       timeout: 30_000,
@@ -88,28 +94,90 @@ test.describe('The Positions panel', () => {
   })
 })
 
-test.describe('The panels that replaced screens', () => {
-  test('are where the old links go, and where the chrome opens them', async ({ page }) => {
+test.describe('The routes that used to be screens', () => {
+  test('all land on the surface with what they were carrying', async ({ page }) => {
     await register(page, newPhone())
 
+    // The surface's own old route, with everything a signal link puts on it.
+    // These parameters are the reason the redirect forwards the query string
+    // whole rather than by name.
+    await page.goto('/trade?symbol=R_100&direction=sell&sl=1.5&tp=2.5&expired=1')
+    await page.waitForURL(/\/\?symbol=R_100/)
+
+    const params = new URL(page.url()).searchParams
+    expect(params.get('direction')).toBe('sell')
+    expect(params.get('sl')).toBe('1.5')
+    expect(params.get('tp')).toBe('2.5')
+    expect(params.get('expired')).toBe('1')
+
+    // And the surface read them rather than merely keeping them in the bar:
+    // the ticket is priced on the symbol the link named, in the direction it
+    // named.
+    await expect(page.getByRole('button', { name: /Sell R_100 for/ })).toBeVisible({
+      timeout: 30_000,
+    })
+
     for (const [path, name] of [
+      ['/portfolio', 'Positions'],
       ['/wallet', 'History'],
       ['/signals', 'Signals'],
       ['/profile', 'Account'],
     ]) {
       // A link somebody sent, or a bookmark from before the move.
       await page.goto(path)
-      await page.waitForURL(new RegExp(`/trade\\?.*panel=${name.toLowerCase()}`))
+      await page.waitForURL(new RegExp(`/\\?.*panel=${name.toLowerCase()}`))
       await expect(panelOf(page, name)).toBeVisible()
       await closePanel(page, name)
       await expect(panelOf(page, name)).toBeHidden()
 
       // And the way a user without the link gets there: the top bar on a
-      // desktop, the bottom bar or the drawer on a phone.
+      // desktop, the bottom bar on a phone. Both are toggles now.
       await openPanel(page, name)
       await expect(panelOf(page, name)).toBeVisible()
       await closePanel(page, name)
     }
+  })
+
+  test('anything else falls back to the surface', async ({ page }) => {
+    await register(page, newPhone())
+
+    await page.goto('/home')
+    await page.waitForURL(/\/$/)
+    await expect(page.getByRole('button', { name: /(Buy|Sell) R_75 for/ })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+})
+
+test.describe('Getting around on a phone', () => {
+  test('the bottom bar carries the panels and the drawer carries the rest', async ({ page }) => {
+    test.skip(isWide(page), 'the bottom bar and the drawer are the phone’s chrome')
+
+    await register(page, newPhone())
+
+    // Four toggles, no destinations: there is nowhere to go.
+    const bar = page.getByRole('navigation', { name: 'Bottom' })
+    await expect(bar.getByRole('link')).toHaveCount(0)
+    for (const name of ['Positions', 'History', 'Signals', 'Account']) {
+      await expect(bar.getByRole('button', { name, exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      )
+    }
+
+    // Tapping one opens it, and tapping it again is the way back to the chart.
+    await openPanel(page, 'Signals')
+    await closePanel(page, 'Signals')
+    await expect(panelOf(page, 'Signals')).toBeHidden()
+
+    // The drawer is now the three things that are not panels, and offers no
+    // second route to the four that are.
+    await page.getByRole('button', { name: 'Open menu' }).click()
+    const menu = page.getByRole('dialog', { name: 'Menu' })
+    await expect(menu.getByRole('button', { name: 'Deposit' })).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'Withdraw' })).toBeVisible()
+    await expect(menu.getByRole('button', { name: 'Log out' })).toBeVisible()
+    await expect(menu.getByRole('link')).toHaveCount(0)
   })
 })
 
@@ -120,7 +188,7 @@ test.describe('The History panel', () => {
     await register(page, newPhone())
 
     await page.goto('/wallet')
-    await page.waitForURL(/\/trade\?.*panel=history/)
+    await page.waitForURL(/\/\?.*panel=history/)
 
     const history = panelOf(page, 'History')
     await expect(history).toBeVisible()
@@ -155,7 +223,6 @@ test.describe('The History panel', () => {
     test.skip((page.viewportSize()?.width ?? 0) < 1024, 'desktop has a default panel; a phone does not')
 
     await register(page, newPhone())
-    await page.goto('/trade')
     await expect(panelOf(page, 'Positions')).toBeVisible()
 
     await openPanel(page, 'History')

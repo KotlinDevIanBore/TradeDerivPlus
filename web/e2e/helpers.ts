@@ -9,26 +9,35 @@ export function newPhone(): string {
 
 export const PASSWORD = 'hunter2024'
 
-/**
- * Navigates using whichever chrome the current viewport actually shows -- the
- * bottom bar on a phone, the top bar on a desktop. These specs run in both
- * projects, and they care about arriving, not about which bar got them there.
- *
- * Only screens are reachable this way now; the panels have their own helpers
- * below. Home has no top-bar entry at all -- the logo is the way back, as it
- * will be when Trade becomes the app's surface.
- */
-export async function goTo(page: Page, destination: string) {
-  if (isWide(page) && destination === 'Home') {
-    await page.getByRole('link', { name: 'TradeDerivPlus home' }).click()
-    return
-  }
-
-  await page.locator('nav:visible').getByRole('link', { name: destination, exact: true }).click()
+export function isWide(page: Page) {
+  return (page.viewportSize()?.width ?? 0) >= 1024
 }
 
-function isWide(page: Page) {
-  return (page.viewportSize()?.width ?? 0) >= 1024
+/**
+ * The shell's account pill. It is where a balance is read now that Home is
+ * gone, and its presence is what "the session is live" looks like: it renders
+ * only once the account and the wallet have answered.
+ */
+export function accountPill(page: Page) {
+  return page.getByRole('button', { name: 'Switch account' })
+}
+
+/**
+ * The control that opens a panel, in whichever bar this viewport shows: the
+ * top bar on a desktop, the bottom bar on a phone. Both are toggles rather
+ * than links -- there is nowhere to navigate to -- so both are buttons named
+ * for the panel, and the bottom bar's name comes from its aria-label because
+ * the icon stands alone at that size.
+ *
+ * Scoped to the bar, because the other bar is in the DOM at every width, just
+ * hidden.
+ */
+export function panelToggle(page: Page, name: string) {
+  const bar = isWide(page)
+    ? page.getByRole('banner')
+    : page.getByRole('navigation', { name: 'Bottom' })
+
+  return bar.getByRole('button', { name, exact: true })
 }
 
 /**
@@ -45,26 +54,17 @@ export function panelOf(page: Page, name: string) {
 /**
  * Opens a panel however this viewport opens it, and leaves it open.
  *
- * On a desktop the control is a toggle, and a one-shot "is it open?" check
- * raced the render that follows a route change: probe too early, decide it is
- * closed, and the click that follows shuts a panel that had just opened. So
- * the whole open-and-check retries until the panel is actually there.
+ * The control is a toggle at both widths, and a one-shot "is it open?" check
+ * raced the render that follows: probe too early, decide it is closed, and the
+ * click that follows shuts a panel that had just opened. So the whole
+ * open-and-check retries until the panel is actually there.
  */
 export async function openPanel(page: Page, name: string) {
   const it = panelOf(page, name)
 
   await expect(async () => {
     if (!(await it.isVisible())) {
-      if (isWide(page)) {
-        await page.getByRole('button', { name, exact: true }).click()
-      } else {
-        // On a phone, whatever is not on the bottom bar is in the drawer.
-        const link = page.locator('nav:visible').getByRole('link', { name, exact: true })
-        if ((await link.count()) === 0) {
-          await page.getByRole('button', { name: 'Open menu' }).click()
-        }
-        await page.locator('nav:visible').getByRole('link', { name, exact: true }).click()
-      }
+      await panelToggle(page, name).click()
     }
     await expect(it).toBeVisible({ timeout: 2_000 })
 
@@ -114,7 +114,13 @@ export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.getByRole('checkbox').check()
 
   await page.getByRole('button', { name: 'Create account' }).click()
+
+  // Signup lands on the surface, which is the app. There is no Home to check
+  // for any more, so the pill in the top bar is the landing: a demo account,
+  // funded, without a second round trip.
   await page.waitForURL('**/')
+  await expect(accountPill(page)).toContainText('demo')
+  await expect(accountPill(page)).toContainText('$10,000.00')
 }
 
 /**
