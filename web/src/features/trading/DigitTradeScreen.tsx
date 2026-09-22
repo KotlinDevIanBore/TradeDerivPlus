@@ -21,6 +21,8 @@ import { ContractTypeTabs } from './ContractTypeTabs'
 import { DigitDistributionRow } from './DigitDistributionRow'
 import { DigitTicket, type DigitTicketSubmit } from './DigitTicket'
 import { PriceChartLazy } from './PriceChartLazy'
+import { SessionStrip } from './SessionStrip'
+import { digitSessionStats } from './sessionStats'
 import { SymbolPicker } from './SymbolPicker'
 
 const DEFAULT_SYMBOL = 'R_75'
@@ -36,7 +38,13 @@ export function DigitTradeScreen() {
   const symbolsQuery = useSymbols()
   const wallet = useWallet(accountId)
   const openDigits = useOpenDigits(accountId)
+  const settledDigits = useOpenDigits(accountId, 'settled')
   const openDigit = useOpenDigit()
+
+  const digitSession = useMemo(
+    () => digitSessionStats(settledDigits.data?.items ?? [], openDigits.data?.items.length ?? 0),
+    [settledDigits.data, openDigits.data],
+  )
 
   const [range, setRange] = useState<ChartRange>(5)
   const [contractType, setContractType] = useState<DigitContractType>('even_odd')
@@ -170,6 +178,13 @@ export function DigitTradeScreen() {
           pipSize={symbol?.pip_size ?? 4}
           currentPrice={tick?.price}
         />
+
+        <div className="mt-3 px-gutter lg:px-0">
+          <SessionStrip
+            digitSession={digitSession}
+            isLoading={openDigits.isLoading && settledDigits.isLoading}
+          />
+        </div>
       </div>
 
       <div className="sticky bottom-tabbar z-20 mt-4 lg:static lg:mt-0">
