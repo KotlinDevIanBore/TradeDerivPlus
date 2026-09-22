@@ -169,10 +169,9 @@ Everything in the repo that named the surface, and what happened to it. The blan
 | Unit tests | 74 passed |
 | Build | Clean |
 | Lint | 21 warnings — unchanged from the Phase 2 baseline. No new ones |
-| Playwright `desktop` | **14 passed, 1 skipped** |
-| Playwright `mobile` | **10 passed, 1 skipped** |
+| Playwright, both projects | **25 passed, 3 skipped** — `desktop` 14 of 16, `mobile` 11 of 12 |
 
-The skips are the pre-existing admin KYC spec (desktop) and the two breakpoint-specific tests, each of which skips itself at the width it does not apply to: "closing History leaves Positions where it was" is desktop-only, "the bottom bar carries the panels" is phone-only.
+The three skips are the pre-existing admin KYC spec, and the two breakpoint-specific tests, each of which skips itself at the width it does not apply to: "closing History leaves Positions where it was" is desktop-only, "the bottom bar carries the panels" is phone-only.
 
 **Five-route redirect coverage, explicitly** — `user.panels.spec.ts`, "all land on the surface with what they were carrying", run at both breakpoints:
 
