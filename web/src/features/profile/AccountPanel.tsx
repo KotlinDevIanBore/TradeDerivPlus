@@ -4,7 +4,6 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { Button } from '@/components/ui/Button'
 import { Card, CardTitle } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { PageHeader } from '@/features/shell/PageHeader'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useLogout } from '@/hooks/useAuth'
 import { useMe } from '@/hooks/useQueries'
@@ -24,7 +23,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-export function ProfileScreen() {
+export function AccountPanel() {
   const me = useMe()
   const { accounts, isLoading } = useActiveAccount()
   const logout = useLogout()
@@ -33,9 +32,7 @@ export function ProfileScreen() {
   const kyc = user?.kyc_status ?? 'pending'
 
   return (
-    <div className="space-y-3 px-gutter py-2 lg:px-6">
-      <PageHeader title="Profile" />
-
+    <div className="space-y-3 py-2">
       <Card>
         {me.isLoading ? (
           <div className="space-y-3">

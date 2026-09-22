@@ -10,6 +10,7 @@ import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
+import { AccountPanel } from '@/features/profile/AccountPanel'
 import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
 import { SignalsPanel } from '@/features/signals/SignalsPanel'
 import { DepositSheet } from '@/features/wallet/DepositSheet'
@@ -33,6 +34,7 @@ const panels: Record<PanelName, { title: string; content: React.ReactNode }> = {
   positions: { title: 'Positions', content: <PositionsPanel /> },
   history: { title: 'History', content: <HistoryPanel /> },
   signals: { title: 'Signals', content: <SignalsPanel /> },
+  account: { title: 'Account', content: <AccountPanel /> },
 }
 
 /**

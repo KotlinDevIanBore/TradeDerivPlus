@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -80,7 +80,6 @@ function Action({
  */
 export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const logout = useLogout()
-  const { pathname } = useLocation()
   const { panel, href } = usePanel()
   const close = () => onOpenChange(false)
 
@@ -116,10 +115,10 @@ export function NavDrawer({ open, onOpenChange }: { open: boolean; onOpenChange:
               onNavigate={close}
             />
             <Destination
-              to="/profile"
+              to={href('account')}
               label="Account"
               icon={UserIcon}
-              active={pathname === '/profile'}
+              active={panel === 'account'}
               onNavigate={close}
             />
           </ul>

@@ -160,13 +160,23 @@ export function TopBar({
             <span className="hidden min-[400px]:inline">Deposit</span>
           </Button>
 
-          <Link
-            to="/profile"
-            className="hidden rounded-lg p-1.5 text-muted transition-colors hover:bg-surface hover:text-text lg:block"
-            aria-label="Profile"
+          {/* The icon opens the Account panel rather than going anywhere, so
+              it says pressed like the rest of the row. Its label is the panel's
+              name, which is also how the panel is found and closed. */}
+          <button
+            type="button"
+            onClick={() => panel.toggle('account')}
+            aria-pressed={panel.panel === 'account'}
+            aria-label="Account"
+            className={cn(
+              'hidden rounded-lg p-1.5 transition-colors lg:block',
+              panel.panel === 'account'
+                ? 'bg-accent-subtle text-accent'
+                : 'text-muted hover:bg-surface hover:text-text',
+            )}
           >
-            <UserIcon className="h-5 w-5" />
-          </Link>
+            <UserIcon className="h-5 w-5" aria-hidden />
+          </button>
         </div>
       </div>
     </header>

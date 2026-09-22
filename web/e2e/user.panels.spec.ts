@@ -88,6 +88,31 @@ test.describe('The Positions panel', () => {
   })
 })
 
+test.describe('The panels that replaced screens', () => {
+  test('are where the old links go, and where the chrome opens them', async ({ page }) => {
+    await register(page, newPhone())
+
+    for (const [path, name] of [
+      ['/wallet', 'History'],
+      ['/signals', 'Signals'],
+      ['/profile', 'Account'],
+    ]) {
+      // A link somebody sent, or a bookmark from before the move.
+      await page.goto(path)
+      await page.waitForURL(new RegExp(`/trade\\?.*panel=${name.toLowerCase()}`))
+      await expect(panelOf(page, name)).toBeVisible()
+      await closePanel(page, name)
+      await expect(panelOf(page, name)).toBeHidden()
+
+      // And the way a user without the link gets there: the top bar on a
+      // desktop, the bottom bar or the drawer on a phone.
+      await openPanel(page, name)
+      await expect(panelOf(page, name)).toBeVisible()
+      await closePanel(page, name)
+    }
+  })
+})
+
 test.describe('The History panel', () => {
   test('arrives from the old Wallet link and opens a transaction over itself', async ({
     page,

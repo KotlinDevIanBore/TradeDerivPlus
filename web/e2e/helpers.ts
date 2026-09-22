@@ -55,8 +55,16 @@ export async function openPanel(page: Page, name: string) {
 
   await expect(async () => {
     if (!(await it.isVisible())) {
-      if (isWide(page)) await page.getByRole('button', { name, exact: true }).click()
-      else await page.locator('nav:visible').getByRole('link', { name, exact: true }).click()
+      if (isWide(page)) {
+        await page.getByRole('button', { name, exact: true }).click()
+      } else {
+        // On a phone, whatever is not on the bottom bar is in the drawer.
+        const link = page.locator('nav:visible').getByRole('link', { name, exact: true })
+        if ((await link.count()) === 0) {
+          await page.getByRole('button', { name: 'Open menu' }).click()
+        }
+        await page.locator('nav:visible').getByRole('link', { name, exact: true }).click()
+      }
     }
     await expect(it).toBeVisible({ timeout: 2_000 })
 
