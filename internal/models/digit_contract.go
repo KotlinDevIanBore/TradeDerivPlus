@@ -79,3 +79,13 @@ type DigitContract struct {
 func WinCredit(stake, payoutRatio decimal.Decimal) decimal.Decimal {
 	return stake.Mul(decimal.NewFromInt(1).Add(payoutRatio)).Round(2)
 }
+
+// DigitQuote is a read-only snapshot of the static payout table for a stake.
+// Same numbers Open would persist — not a second pricing path.
+type DigitQuote struct {
+	ContractType    string          `json:"contract_type"`
+	Selection       DigitSelection  `json:"selection"`
+	Stake           decimal.Decimal `json:"stake"`
+	PayoutRatio     decimal.Decimal `json:"payout_ratio"`
+	PotentialPayout decimal.Decimal `json:"potential_payout"`
+}

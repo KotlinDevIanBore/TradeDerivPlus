@@ -29,6 +29,14 @@ export interface DigitSelection {
   barrier?: number
 }
 
+export interface DigitQuote {
+  contract_type: DigitContractType
+  selection: DigitSelection
+  stake: string
+  payout_ratio: string
+  potential_payout: string
+}
+
 export interface DigitContract {
   id: string
   account_id: string

@@ -103,6 +103,7 @@ func New(d Deps) *gin.Engine {
 
 		protected.GET("/digit-contracts", d.Handler.Digit.List)
 		protected.GET("/digit-contracts/summary", d.Handler.Digit.Summary)
+		protected.GET("/digit-contracts/quote", d.Handler.Digit.Quote)
 		protected.GET("/digit-contracts/:id", d.Handler.Digit.Get)
 		protected.POST("/digit-contracts", d.Handler.Digit.Open)
 	}

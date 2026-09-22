@@ -19,6 +19,7 @@ export const queryKeys = {
     status === undefined
       ? (['digitContracts', accountId] as const)
       : (['digitContracts', accountId, status] as const),
+  digitQuote: (params: unknown) => ['digitQuote', params] as const,
   symbols: () => ['symbols'] as const,
   signals: (symbol?: string) => (symbol ? (['signals', symbol] as const) : (['signals'] as const)),
   rate: () => ['rate'] as const,

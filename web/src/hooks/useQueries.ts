@@ -7,7 +7,7 @@ import { tradesApi, type OpenTradeInput } from '@/api/trades'
 import { walletApi } from '@/api/wallet'
 import { queryKeys } from '@/lib/queryKeys'
 import { useSessionStore } from '@/store/session'
-import type { AccountType, DigitContractStatus, TradeStatus, TxType } from '@/types'
+import type { AccountType, DigitContractStatus, DigitContractType, DigitSelection, TradeStatus, TxType } from '@/types'
 
 /**
  * Server state lives here. Components receive data and callbacks as props from
@@ -125,12 +125,34 @@ export function useCloseTrade() {
   })
 }
 
-export function useOpenDigits(accountId: string | null, status: DigitContractStatus = 'open') {
+export function useOpenDigits(accountId: string | null, status: DigitContractStatus | 'settled' = 'open') {
   return useQuery({
     queryKey: queryKeys.digitContracts(accountId ?? '', status),
     queryFn: () => digitApi.list(accountId!, status, { limit: 50 }),
     enabled: Boolean(accountId),
     refetchInterval: status === 'open' ? 5_000 : false,
+  })
+}
+
+export function useDigitQuote(
+  contractType: DigitContractType,
+  selection: DigitSelection,
+  stake: string,
+  enabled = true,
+) {
+  const stakeOk = Boolean(stake) && Number(stake) > 0
+  return useQuery({
+    queryKey: queryKeys.digitQuote({ contractType, selection, stake }),
+    queryFn: () =>
+      digitApi.quote({
+        contract_type: contractType,
+        selection,
+        stake,
+      }),
+    enabled: enabled && stakeOk,
+    staleTime: 60_000,
+    // Quotes are static-table reads; keep previous numbers while stake edits settle.
+    placeholderData: (prev) => prev,
   })
 }
 

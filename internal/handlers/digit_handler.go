@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,6 +17,63 @@ type DigitHandler struct{ digits *service.DigitService }
 
 func NewDigitHandler(digits *service.DigitService) *DigitHandler {
 	return &DigitHandler{digits: digits}
+}
+
+// Quote returns static-table payout for a type/selection/stake.
+// GET /digit-contracts/quote?contract_type=&stake=&parity=|mode=&digit=|side=&barrier=
+func (h *DigitHandler) Quote(c *gin.Context) {
+	contractType := c.Query("contract_type")
+	if contractType == "" {
+		badRequest(c, "contract_type is required", "contract_type")
+		return
+	}
+	stakeStr := c.Query("stake")
+	if stakeStr == "" {
+		badRequest(c, "stake is required", "stake")
+		return
+	}
+	stake, err := decimal.NewFromString(stakeStr)
+	if err != nil {
+		badRequest(c, "Enter a valid stake", "stake")
+		return
+	}
+
+	sel := models.DigitSelection{
+		Mode:   c.Query("mode"),
+		Parity: c.Query("parity"),
+		Side:   c.Query("side"),
+	}
+	if d := c.Query("digit"); d != "" {
+		n, err := parseDigitParam(d)
+		if err != nil {
+			badRequest(c, "digit must be 0–9", "digit")
+			return
+		}
+		sel.Digit = &n
+	}
+	if b := c.Query("barrier"); b != "" {
+		n, err := parseDigitParam(b)
+		if err != nil {
+			badRequest(c, "barrier must be 0–9", "barrier")
+			return
+		}
+		sel.Barrier = &n
+	}
+
+	quote, err := h.digits.Quote(contractType, sel, stake)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, quote)
+}
+
+func parseDigitParam(s string) (int, error) {
+	i, err := strconv.Atoi(s)
+	if err != nil || i < 0 || i > 9 {
+		return 0, strconv.ErrRange
+	}
+	return i, nil
 }
 
 type openDigitRequest struct {

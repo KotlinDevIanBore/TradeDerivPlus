@@ -440,6 +440,28 @@ func (s *DigitService) Get(ctx context.Context, userID, id uuid.UUID) (*models.D
 	return s.EnsureSettled(ctx, c)
 }
 
+// Quote returns the static-table payout for a type/selection/stake — the same
+// numbers Open would snapshot. Read-only; no wallet or feed involved.
+func (s *DigitService) Quote(contractType string, sel models.DigitSelection, stake decimal.Decimal) (*models.DigitQuote, error) {
+	if err := validateDigitSelection(contractType, sel); err != nil {
+		return nil, err
+	}
+	if !stake.GreaterThan(decimal.Zero) {
+		return nil, invalid("stake", "Enter a stake greater than zero")
+	}
+	ratio, err := models.PayoutRatioFor(contractType, sel)
+	if err != nil {
+		return nil, invalid("selection", err.Error())
+	}
+	return &models.DigitQuote{
+		ContractType:    contractType,
+		Selection:       sel,
+		Stake:           stake.Round(2),
+		PayoutRatio:     ratio,
+		PotentialPayout: models.WinCredit(stake, ratio),
+	}, nil
+}
+
 func (s *DigitService) List(ctx context.Context, userID, accountID uuid.UUID, status string, limit, offset int) ([]models.DigitContract, int, error) {
 	account, err := s.store.Accounts.GetByID(ctx, accountID)
 	if err != nil {

@@ -3,11 +3,11 @@ import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { humanMessage } from '@/components/ErrorState'
+import { useDigitQuote } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
-import { payoutPercentLabel, payoutRatioFor, winCredit } from '@/lib/digitPayout'
 import { money } from '@/lib/format'
 import { dec } from '@/lib/money'
-import type { DigitContractType, DigitSelection, TradeSymbol, Wallet } from '@/types'
+import type { DigitContractType, DigitQuote, DigitSelection, TradeSymbol, Wallet } from '@/types'
 
 const QUICK_STAKES = [5, 10, 50]
 
@@ -21,8 +21,8 @@ export interface DigitTicketSubmit {
 
 /**
  * Digit order ticket. Stake UX mirrors the CFD ticket; selection and payout
- * buttons are new. Payout figures come from the client mirror of the server's
- * static table (see digitPayout.ts) until a quote API exists.
+ * buttons are new. Payout figures come from GET /digit-contracts/quote — the
+ * same static table Open snapshots from.
  */
 export function DigitTicket({
   contractType,
@@ -65,10 +65,9 @@ export function DigitTicket({
     [contractType, digit, barrier],
   )
 
-  const primaryRatio = payoutRatioFor(contractType, primary)
-  const secondaryRatio = payoutRatioFor(contractType, secondary)
-  const primaryCredit = primaryRatio ? winCredit(stakeValue, primaryRatio) : null
-  const secondaryCredit = secondaryRatio ? winCredit(stakeValue, secondaryRatio) : null
+  const quoteEnabled = !stakeError && stakeValue.greaterThan(0)
+  const primaryQuote = useDigitQuote(contractType, primary, stake, quoteEnabled)
+  const secondaryQuote = useDigitQuote(contractType, secondary, stake, quoteEnabled)
 
   const canSubmit =
     !disabled &&
@@ -76,8 +75,8 @@ export function DigitTicket({
     !stakeError &&
     stakeValue.greaterThan(0) &&
     Boolean(symbol) &&
-    primaryRatio !== null &&
-    secondaryRatio !== null
+    Boolean(primaryQuote.data) &&
+    Boolean(secondaryQuote.data)
 
   const fire = (side: 'primary' | 'secondary') => {
     if (!canSubmit) return
@@ -95,7 +94,7 @@ export function DigitTicket({
         <DigitPicker label="Digit" value={digit} onChange={setDigit} />
       ) : null}
       {contractType === 'over_under' ? (
-        <DigitPicker label="Barrier" value={barrier} onChange={setBarrier} exclude={[]} />
+        <DigitPicker label="Barrier" value={barrier} onChange={setBarrier} />
       ) : null}
 
       <div className="mt-3">
@@ -148,8 +147,7 @@ export function DigitTicket({
       <div className="mt-4 grid grid-cols-2 gap-2">
         <OutcomeButton
           label={primaryLabel(contractType)}
-          credit={primaryCredit}
-          ratio={primaryRatio}
+          quote={primaryQuote.data}
           variant="primary"
           disabled={!canSubmit}
           loading={submitting}
@@ -157,8 +155,7 @@ export function DigitTicket({
         />
         <OutcomeButton
           label={secondaryLabel(contractType)}
-          credit={secondaryCredit}
-          ratio={secondaryRatio}
+          quote={secondaryQuote.data}
           variant="secondary"
           disabled={!canSubmit}
           loading={submitting}
@@ -177,7 +174,6 @@ function DigitPicker({
   label: string
   value: number
   onChange: (n: number) => void
-  exclude?: number[]
 }) {
   return (
     <div>
@@ -206,21 +202,20 @@ function DigitPicker({
 
 function OutcomeButton({
   label,
-  credit,
-  ratio,
+  quote,
   variant,
   disabled,
   loading,
   onClick,
 }: {
   label: string
-  credit: ReturnType<typeof dec> | null
-  ratio: ReturnType<typeof dec> | null
+  quote?: DigitQuote
   variant: 'primary' | 'secondary'
   disabled: boolean
   loading: boolean
   onClick: () => void
 }) {
+  const percent = quote ? `${dec(quote.payout_ratio).times(100).toFixed(2)}%` : null
   return (
     <Button
       size="lg"
@@ -236,9 +231,9 @@ function OutcomeButton({
     >
       <span className="flex flex-col items-center leading-tight">
         <span>{label}</span>
-        {credit && ratio ? (
+        {quote ? (
           <span className="text-meta font-medium opacity-90 tnum">
-            {money(credit.toFixed(2))} · {payoutPercentLabel(ratio)}
+            {money(quote.potential_payout)} · {percent}
           </span>
         ) : null}
       </span>
