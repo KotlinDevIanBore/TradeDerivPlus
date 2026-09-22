@@ -8,7 +8,6 @@ import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/ho
 import { usePriceFeed } from '@/hooks/usePriceFeed'
 import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
-import { cn } from '@/lib/cn'
 import { money, signedMoney } from '@/lib/format'
 import { AccountPanel } from '@/features/profile/AccountPanel'
 import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
@@ -23,7 +22,7 @@ import { overlay, useOverlayOpen } from './overlays'
 import { TabBar } from './TabBar'
 import { TopBar } from './TopBar'
 import { useActiveAccount } from './useActiveAccount'
-import { MAIN_SURFACE, usePanel, type PanelName } from './usePanel'
+import { usePanel, type PanelName } from './usePanel'
 
 /**
  * What each panel is called and what is inside it. One place, so adding a
@@ -58,7 +57,6 @@ export function AppShell() {
   const setActiveAccount = useSessionStore((s) => s.setActiveAccount)
 
   const menuOpen = useOverlayOpen('menu')
-  const onMainSurface = location.pathname === MAIN_SURFACE
   const { panel, close: closePanel } = usePanel()
 
   const accountsOpen = useOverlayOpen('accounts')
@@ -172,17 +170,11 @@ export function AppShell() {
           {panel ? panels[panel].content : null}
         </Panel>
 
-        <main
-          className={cn(
-            'min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8',
-            // The trading surface takes the whole window: a chart inside a
-            // 1200px reading width is a widget, and the panel arriving beside
-            // it would make that worse. The screens that have not become
-            // panels yet keep the cap they were laid out for, and stop needing
-            // it when they dissolve.
-            !onMainSurface && 'mx-auto w-full max-w-[1200px]',
-          )}
-        >
+        {/* The surface takes the whole window. The 1200px reading width that
+            used to apply to everything else went with the screens that needed
+            it: a chart inside one is a widget, and a panel beside it made that
+            worse. */}
+        <main className="min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8">
           <Outlet />
         </main>
       </div>
