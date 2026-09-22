@@ -16,6 +16,8 @@ interface SheetProps {
   showClose?: boolean
   /** Names what is being closed, where "Close" alone would be ambiguous. */
   closeLabel?: string
+  /** The scrolling body, for content that needs to watch it scroll. */
+  bodyRef?: React.Ref<HTMLDivElement>
   /**
    * Where it comes from. `bottom` is the sheet everything else uses; `left` is
    * the navigation drawer, which stays a drawer at every width because only a
@@ -42,6 +44,7 @@ export function Sheet({
   full,
   showClose = true,
   closeLabel = 'Close',
+  bodyRef,
   side = 'bottom',
 }: SheetProps) {
   const drawer = side === 'left'
@@ -105,7 +108,10 @@ export function Sheet({
             ) : null}
           </div>
 
-          <div className={cn('overflow-y-auto px-5 pb-6', (full || column) && 'flex-1')}>
+          <div
+            ref={bodyRef}
+            className={cn('overflow-y-auto px-5 pb-6', (full || column) && 'flex-1')}
+          >
             {children}
           </div>
         </Dialog.Content>

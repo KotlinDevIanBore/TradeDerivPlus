@@ -1,6 +1,22 @@
+import { createContext, useContext, useState } from 'react'
 import { X } from 'lucide-react'
 import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { Sheet } from './Sheet'
+
+const PanelScroll = createContext<HTMLElement | null>(null)
+
+/**
+ * The element a panel scrolls inside, for content that needs to know where
+ * scrolling happens rather than merely that it does.
+ *
+ * A panel scrolls itself, so `window.scrollY` is zero however far down its
+ * content the user is. Anything watching the window from inside a panel is
+ * watching the wrong thing. Returns null until the panel has mounted, and for
+ * content rendered outside a panel.
+ */
+export function usePanelScroll() {
+  return useContext(PanelScroll)
+}
 
 /**
  * A panel of content beside the main surface.
@@ -28,6 +44,11 @@ export function Panel({
   children: React.ReactNode
 }) {
   const desktop = useIsDesktop()
+  // State rather than a ref: consumers read this during render, so the node
+  // arriving has to be a render of its own.
+  const [scroller, setScroller] = useState<HTMLElement | null>(null)
+
+  const body = <PanelScroll.Provider value={scroller}>{children}</PanelScroll.Provider>
 
   if (desktop) {
     if (!open) return null
@@ -49,7 +70,9 @@ export function Panel({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-4 pb-6">{children}</div>
+        <div ref={setScroller} className="flex-1 overflow-y-auto px-4 pb-6">
+          {body}
+        </div>
       </aside>
     )
   }
@@ -63,8 +86,9 @@ export function Panel({
       side="panel"
       title={title}
       closeLabel={`Close ${title}`}
+      bodyRef={setScroller}
     >
-      {children}
+      {body}
     </Sheet>
   )
 }
