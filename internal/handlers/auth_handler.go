@@ -143,7 +143,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, meResponse{
-		User:                    *user,
+		User:                  *user,
 		DigitContractsEnabled: digit,
 	})
 }

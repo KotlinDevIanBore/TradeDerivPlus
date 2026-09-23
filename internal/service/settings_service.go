@@ -21,10 +21,10 @@ type SettingsService struct {
 	// Bootstrap default when the row is missing — from DIGIT_CONTRACTS_ENABLED.
 	digitDefault bool
 
-	mu        sync.Mutex
-	digit     bool
-	digitAt   time.Time
-	digitTTL  time.Duration
+	mu       sync.Mutex
+	digit    bool
+	digitAt  time.Time
+	digitTTL time.Duration
 }
 
 func NewSettingsService(store *repository.Store, digitDefault bool, log *slog.Logger) *SettingsService {

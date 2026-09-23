@@ -77,11 +77,11 @@ func parseDigitParam(s string) (int, error) {
 }
 
 type openDigitRequest struct {
-	AccountID    string          `json:"account_id" binding:"required"`
-	Symbol       string          `json:"symbol" binding:"required"`
-	ContractType string          `json:"contract_type" binding:"required"`
-	Selection    jsonSelection   `json:"selection" binding:"required"`
-	Stake        string          `json:"stake" binding:"required"`
+	AccountID    string        `json:"account_id" binding:"required"`
+	Symbol       string        `json:"symbol" binding:"required"`
+	ContractType string        `json:"contract_type" binding:"required"`
+	Selection    jsonSelection `json:"selection" binding:"required"`
+	Stake        string        `json:"stake" binding:"required"`
 }
 
 // jsonSelection mirrors models.DigitSelection for binding.

@@ -390,10 +390,10 @@ func (s *DigitService) voidContract(ctx context.Context, c *models.DigitContract
 			Status:      models.StatusCompleted,
 			Reference:   &ref,
 			Metadata: map[string]any{
-				"symbol":  c.SymbolCode,
-				"status":  models.DigitVoid,
-				"reason":  "auto_void",
-				"waited":  waited.String(),
+				"symbol": c.SymbolCode,
+				"status": models.DigitVoid,
+				"reason": "auto_void",
+				"waited": waited.String(),
 			},
 		}); err != nil {
 			return err

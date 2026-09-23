@@ -207,12 +207,12 @@ func (r *DigitContractRepo) ListOpenBySymbol(ctx context.Context, symbolID uuid.
 
 // Summary aggregates settled session stats for an account.
 type DigitSummary struct {
-	OpenCount     int             `json:"open_count"`
-	WonCount      int             `json:"won_count"`
-	LostCount     int             `json:"lost_count"`
-	VoidCount     int             `json:"void_count"`
-	SessionPnL    decimal.Decimal `json:"session_pnl"`
-	SessionSince  time.Time       `json:"session_since"`
+	OpenCount    int             `json:"open_count"`
+	WonCount     int             `json:"won_count"`
+	LostCount    int             `json:"lost_count"`
+	VoidCount    int             `json:"void_count"`
+	SessionPnL   decimal.Decimal `json:"session_pnl"`
+	SessionSince time.Time       `json:"session_since"`
 }
 
 func (r *DigitContractRepo) Summary(ctx context.Context, accountID uuid.UUID, since time.Time) (DigitSummary, error) {
