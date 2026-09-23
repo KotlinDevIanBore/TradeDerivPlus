@@ -25,9 +25,10 @@ type Config struct {
 	DerivAppID  string
 	UseMockFeed bool
 
-	// DigitContractsEnabled seeds the app_settings row on first boot when the
-	// key is missing. After that the DB row is the source of truth and can be
-	// flipped without restarting the API (see SettingsService).
+	// DigitContractsEnabled seeds app_settings.digit_contracts_enabled when
+	// the row is missing. Default true when DIGIT_CONTRACTS_ENABLED is unset.
+	// Explicit false/true from env seeds that value; an existing DB row is
+	// never overwritten on startup (see SettingsService).
 	DigitContractsEnabled bool
 
 	// Daraja / M-Pesa
@@ -92,7 +93,7 @@ func Load() (*Config, error) {
 		DerivAppID:  getEnv("DERIV_APP_ID", "1089"),
 		UseMockFeed: getBool("USE_MOCK_FEED", true),
 
-		DigitContractsEnabled: getBool("DIGIT_CONTRACTS_ENABLED", false),
+		DigitContractsEnabled: getBool("DIGIT_CONTRACTS_ENABLED", true),
 
 		MpesaBaseURL:        getEnv("MPESA_BASE_URL", "https://sandbox.safaricom.co.ke"),
 		MpesaConsumerKey:    getEnv("MPESA_CONSUMER_KEY", ""),

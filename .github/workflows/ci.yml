@@ -157,6 +157,10 @@ jobs:
           JWT_SECRET: ci-only-secret-not-used-anywhere-real
           USE_MOCK_FEED: "true"
           USE_MOCK_MPESA: "true"
+          # Existing Playwright specs exercise the CFD surface (Buy ticket,
+          # transaction History, Signals). Keep that mode in CI until digit
+          # e2e lands; production still defaults digit on when unset.
+          DIGIT_CONTRACTS_ENABLED: "false"
           # Loosened from the production default so a suite that registers
           # dozens of users is not fighting the limiter, but still tight
           # enough that smoke.py's concurrent burst proves it fires.
