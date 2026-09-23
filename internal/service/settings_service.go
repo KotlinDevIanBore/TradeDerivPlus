@@ -11,14 +11,21 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 )
 
+// settingStore is the app_settings persistence SettingsService needs.
+type settingStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+}
+
 // SettingsService reads runtime feature flags. Values are cached briefly so
 // /auth/me does not hit the database on every request, but a SQL flip still
 // becomes visible without restarting the process.
 type SettingsService struct {
-	store *repository.Store
-	log   *slog.Logger
+	settings settingStore
+	log      *slog.Logger
 
-	// Bootstrap default when the row is missing — from DIGIT_CONTRACTS_ENABLED.
+	// digitDefault is used when the DB row is missing (and as Bootstrap seed).
+	// Comes from DIGIT_CONTRACTS_ENABLED, which itself defaults to true.
 	digitDefault bool
 
 	mu       sync.Mutex
@@ -28,18 +35,25 @@ type SettingsService struct {
 }
 
 func NewSettingsService(store *repository.Store, digitDefault bool, log *slog.Logger) *SettingsService {
+	return newSettingsService(store.Settings, digitDefault, log)
+}
+
+func newSettingsService(settings settingStore, digitDefault bool, log *slog.Logger) *SettingsService {
+	if log == nil {
+		log = slog.Default()
+	}
 	return &SettingsService{
-		store:        store,
+		settings:     settings,
 		log:          log,
 		digitDefault: digitDefault,
 		digitTTL:     10 * time.Second,
 	}
 }
 
-// Bootstrap ensures digit_contracts_enabled exists. Env is only the seed for a
-// missing row; after that the DB wins.
+// Bootstrap ensures digit_contracts_enabled exists. Env/default only seeds a
+// missing row; an existing true or false is never overwritten on startup.
 func (s *SettingsService) Bootstrap(ctx context.Context) error {
-	_, err := s.store.Settings.Get(ctx, repository.SettingDigitContractsEnabled)
+	_, err := s.settings.Get(ctx, repository.SettingDigitContractsEnabled)
 	if err == nil {
 		return nil
 	}
@@ -47,7 +61,7 @@ func (s *SettingsService) Bootstrap(ctx context.Context) error {
 		return err
 	}
 	value := strconv.FormatBool(s.digitDefault)
-	if err := s.store.Settings.Set(ctx, repository.SettingDigitContractsEnabled, value); err != nil {
+	if err := s.settings.Set(ctx, repository.SettingDigitContractsEnabled, value); err != nil {
 		return err
 	}
 	s.log.Info("seeded app setting", "key", repository.SettingDigitContractsEnabled, "value", value)
@@ -55,6 +69,8 @@ func (s *SettingsService) Bootstrap(ctx context.Context) error {
 }
 
 // DigitContractsEnabled is the global trading-surface flag.
+// Missing row → digitDefault (true unless DIGIT_CONTRACTS_ENABLED=false).
+// Stored "true"/"false" → that value. Invalid stored value → digitDefault.
 func (s *SettingsService) DigitContractsEnabled(ctx context.Context) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,9 +79,8 @@ func (s *SettingsService) DigitContractsEnabled(ctx context.Context) (bool, erro
 		return s.digit, nil
 	}
 
-	raw, err := s.store.Settings.Get(ctx, repository.SettingDigitContractsEnabled)
+	raw, err := s.settings.Get(ctx, repository.SettingDigitContractsEnabled)
 	if errors.Is(err, repository.ErrNotFound) {
-		// Should not happen after Bootstrap; fall back rather than fail /me.
 		s.digit = s.digitDefault
 		s.digitAt = time.Now()
 		return s.digit, nil
@@ -76,7 +91,9 @@ func (s *SettingsService) DigitContractsEnabled(ctx context.Context) (bool, erro
 	b, err := strconv.ParseBool(raw)
 	if err != nil {
 		s.log.Error("invalid digit_contracts_enabled value", "value", raw, "err", err)
-		return s.digitDefault, nil
+		s.digit = s.digitDefault
+		s.digitAt = time.Now()
+		return s.digit, nil
 	}
 	s.digit = b
 	s.digitAt = time.Now()
