@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react'
-import { Receipt } from 'lucide-react'
+import { History as HistoryIcon, Receipt } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 import { ErrorState } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { DigitSettledRow } from '@/features/portfolio/DigitContractRows'
 import { overlay } from '@/features/shell/overlays'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
-import { useTransactions, useWallet } from '@/hooks/useQueries'
+import { useMe, useOpenDigits, useTransactions, useWallet } from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { cn } from '@/lib/cn'
+import { dayLabel } from '@/lib/format'
 import { useSessionStore } from '@/store/session'
-import type { Transaction, TxType } from '@/types'
+import type { DigitContract, Transaction, TxType } from '@/types'
 import { BalanceCard } from './BalanceCard'
 import { TransactionDetail } from './TransactionDetail'
 import { TransactionRow } from './TransactionRow'
@@ -24,13 +26,91 @@ const FILTERS: { label: string; types?: TxType[] }[] = [
 
 /**
  * The money that has moved: the balance it adds up to, and every deposit,
- * withdrawal and trade behind it.
- *
- * The filter is component state rather than a URL parameter. Unlike the
- * Positions panel's tab, nothing links to a filtered history -- it is a thing
- * you narrow while looking, not a place you send someone.
+ * withdrawal and trade behind it — or, when digit contracts are on, settled
+ * digit contracts instead of the CFD transaction list.
  */
 export function HistoryPanel() {
+  const me = useMe()
+  if (me.data?.digit_contracts_enabled) {
+    return <DigitHistoryPanel />
+  }
+  return <CfdHistoryPanel />
+}
+
+function DigitHistoryPanel() {
+  const { account, accountId } = useActiveAccount()
+  const user = useSessionStore((s) => s.user)
+  const wallet = useWallet(accountId)
+  const settled = useOpenDigits(accountId, 'settled')
+  useRelativeTime()
+
+  const byDay = useMemo(() => {
+    const groups = new Map<string, DigitContract[]>()
+    for (const c of settled.data?.items ?? []) {
+      const key = dayLabel(c.settled_at ?? c.opened_at)
+      groups.set(key, [...(groups.get(key) ?? []), c])
+    }
+    return [...groups.entries()]
+  }, [settled.data])
+
+  const canWithdraw = user?.kyc_status === 'verified'
+
+  return (
+    <div>
+      <BalanceCard
+        account={account}
+        wallet={wallet.data}
+        isLoading={wallet.isLoading}
+        isError={wallet.isError}
+        onRetry={() => wallet.refetch()}
+        onDeposit={overlay.deposit}
+        onWithdraw={overlay.withdraw}
+        canWithdraw={canWithdraw}
+        withdrawHint="Verify your identity to withdraw"
+      />
+
+      <section className="mt-4" aria-label="Settled digit contracts">
+        <h2 className="mb-2 text-meta font-semibold uppercase tracking-wider text-faint">
+          Settled contracts
+        </h2>
+        {settled.isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full rounded-xl" />
+            ))}
+          </div>
+        ) : settled.isError ? (
+          <ErrorState error={settled.error} onRetry={() => settled.refetch()} />
+        ) : byDay.length === 0 ? (
+          <EmptyState
+            icon={HistoryIcon}
+            title="No settled contracts yet"
+            hint="Wins, losses and voids show up here after the next tick."
+          />
+        ) : (
+          <div>
+            {byDay.map(([day, contracts]) => (
+              <section key={day} className="mb-4">
+                <h3 className="sticky top-0 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
+                  {day}
+                </h3>
+                <ul className="-mx-5 divide-y divide-hairline lg:-mx-4">
+                  {contracts.map((c) => (
+                    <li key={c.id}>
+                      <DigitSettledRow contract={c} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function CfdHistoryPanel() {
   const { account, accountId, isDemo } = useActiveAccount()
   const user = useSessionStore((s) => s.user)
 
@@ -44,7 +124,6 @@ export function HistoryPanel() {
 
   const canWithdraw = user?.kyc_status === 'verified'
 
-  // Pending deposits are pinned to the top: they are what a user comes back for.
   const { pending, rest } = useMemo(() => {
     const items = transactions.data?.items ?? []
     return {
@@ -67,7 +146,6 @@ export function HistoryPanel() {
         withdrawHint="Verify your identity to withdraw"
       />
 
-      {/* The chips scroll sideways: four of them do not fit across a panel. */}
       <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto">
         {FILTERS.map((f, i) => (
           <button
@@ -109,9 +187,6 @@ export function HistoryPanel() {
             }
           />
         ) : (
-          // The rows bring their own side padding, so the list cancels the
-          // panel's to sit edge to edge: a row's hover and a pending deposit's
-          // amber edge both want the full width.
           <ul className="-mx-5 divide-y divide-hairline lg:-mx-4">
             {pending.map((t) => (
               <li key={t.id}>

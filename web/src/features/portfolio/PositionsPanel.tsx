@@ -9,16 +9,23 @@ import { Sheet } from '@/components/ui/Sheet'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { toast } from '@/components/ui/Toast'
+import { DigitOpenCard, DigitSettledRow } from '@/features/portfolio/DigitContractRows'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { usePanel } from '@/features/shell/usePanel'
 import { useWatchSymbols } from '@/hooks/usePriceFeed'
-import { useCloseTrade, useTradeSummary, useTrades } from '@/hooks/useQueries'
+import {
+  useCloseTrade,
+  useMe,
+  useOpenDigits,
+  useTradeSummary,
+  useTrades,
+} from '@/hooks/useQueries'
 import { useRelativeTime } from '@/hooks/useRelativeTime'
 import { dayLabel, signedMoney } from '@/lib/format'
 import { pnl } from '@/lib/pnl'
 import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice } from '@/store/market'
-import type { Trade } from '@/types'
+import type { DigitContract, Trade } from '@/types'
 import { ClosedTradeRow, PositionCard } from './PositionCard'
 
 /**
@@ -93,10 +100,117 @@ function CloseConfirm({
 
 /**
  * Everything the Portfolio screen used to be, inside the panel that replaced
- * it. It supplies no padding and no title of its own: the panel around it owns
- * both, and owns them differently at each width.
+ * it. Branches on digit_contracts_enabled — digit mode lists pending/settled
+ * contracts with no close action; CFD mode is unchanged.
  */
 export function PositionsPanel() {
+  const me = useMe()
+  if (me.data?.digit_contracts_enabled) {
+    return <DigitPositionsPanel />
+  }
+  return <CfdPositionsPanel />
+}
+
+function DigitPositionsPanel() {
+  const [params, setParams] = useSearchParams()
+  const { close } = usePanel()
+  const { accountId } = useActiveAccount()
+  const tab = params.get('tab') === 'closed' ? 'closed' : 'open'
+
+  const openContracts = useOpenDigits(accountId, 'open')
+  const settled = useOpenDigits(accountId, 'settled')
+  useRelativeTime()
+
+  const closedByDay = useMemo(() => {
+    const groups = new Map<string, DigitContract[]>()
+    for (const c of settled.data?.items ?? []) {
+      const key = dayLabel(c.settled_at ?? c.opened_at)
+      groups.set(key, [...(groups.get(key) ?? []), c])
+    }
+    return [...groups.entries()]
+  }, [settled.data])
+
+  const openCount = openContracts.data?.items.length ?? 0
+
+  return (
+    <div>
+      <div className="flex gap-2 pb-3 lg:flex-col lg:gap-1.5">
+        <SummaryTile label="Pending">
+          <span className="tnum">{openContracts.isLoading ? '—' : openCount}</span>
+        </SummaryTile>
+        <SummaryTile label="Note">
+          <span className="text-meta font-medium text-muted">Settles next tick</span>
+        </SummaryTile>
+      </div>
+
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setParams(mergeParams({ tab: v }), { replace: true })}
+      >
+        <TabsList>
+          <TabsTrigger value="open">Open</TabsTrigger>
+          <TabsTrigger value="closed">Closed</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="open" className="space-y-3 py-4">
+          {openContracts.isLoading ? (
+            <>
+              <Skeleton className="h-[120px] w-full rounded-card" />
+              <Skeleton className="h-[120px] w-full rounded-card" />
+            </>
+          ) : openContracts.isError ? (
+            <ErrorState error={openContracts.error} onRetry={() => openContracts.refetch()} />
+          ) : openCount === 0 ? (
+            <EmptyState
+              icon={Briefcase}
+              title="No open contracts"
+              hint="Open one from the ticket — it settles on the next tick."
+              action={
+                <Button variant="outline" size="sm" onClick={close}>
+                  Close
+                </Button>
+              }
+            />
+          ) : (
+            openContracts.data!.items.map((c) => <DigitOpenCard key={c.id} contract={c} />)
+          )}
+        </TabsContent>
+
+        <TabsContent value="closed" className="py-4">
+          {settled.isLoading ? (
+            <div className="space-y-2">
+              <Skeleton className="h-16 w-full rounded-card" />
+              <Skeleton className="h-16 w-full rounded-card" />
+            </div>
+          ) : settled.isError ? (
+            <ErrorState error={settled.error} onRetry={() => settled.refetch()} />
+          ) : closedByDay.length === 0 ? (
+            <EmptyState icon={History} title="No settled contracts yet" hint="Wins, losses and voids land here." />
+          ) : (
+            <div>
+              {closedByDay.map(([day, contracts]) => (
+                <section key={day} className="mb-4">
+                  <h3 className="sticky top-0 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
+                    {day}
+                  </h3>
+                  <ul className="divide-y divide-hairline rounded-card border border-border bg-surface">
+                    {contracts.map((c) => (
+                      <li key={c.id}>
+                        <DigitSettledRow contract={c} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function CfdPositionsPanel() {
   const [params, setParams] = useSearchParams()
   const { close } = usePanel()
   const { accountId } = useActiveAccount()
@@ -119,7 +233,6 @@ export function PositionsPanel() {
   useWatchSymbols(symbols)
   useRelativeTime()
 
-  // Group closed trades under sticky day headings.
   const closedByDay = useMemo(() => {
     const groups = new Map<string, Trade[]>()
     for (const trade of closedTrades.data?.items ?? []) {
@@ -155,7 +268,6 @@ export function PositionsPanel() {
             <Skeleton className="h-[68px] flex-1 rounded-card" />
           </>
         ) : summary.isError ? (
-          // Three dashes cannot tell a failed load from a flat day, so say which.
           <div className="flex-1 rounded-card border border-border bg-surface">
             <ErrorState error={summary.error} onRetry={() => summary.refetch()} compact />
           </div>
@@ -205,7 +317,6 @@ export function PositionsPanel() {
               title="No open positions"
               hint="Open one from the chart to see it here."
               action={
-                // The chart is behind this panel now, not somewhere to go.
                 <Button variant="outline" size="sm" onClick={close}>
                   Close
                 </Button>
@@ -239,8 +350,6 @@ export function PositionsPanel() {
             <div>
               {closedByDay.map(([day, trades]) => (
                 <section key={day} className="mb-4">
-                  {/* The panel scrolls itself, so a day heading sticks to the
-                      top of the panel rather than to the top bar's height. */}
                   <h3 className="sticky top-0 z-10 bg-bg/90 py-2 text-meta font-semibold uppercase tracking-wider text-faint backdrop-blur">
                     {day}
                   </h3>

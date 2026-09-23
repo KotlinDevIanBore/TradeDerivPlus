@@ -89,14 +89,21 @@ func run() error {
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, hub, cfg, log)
 	trading := service.NewTradingService(store, feed, hub, log)
+	digits := service.NewDigitService(store, feed, hub, log)
 	signals := service.NewSignalService(store, feed, hub, cfg, log)
 	admin := service.NewAdminService(store, hub, cfg, log)
 	admin.SetConnectionCounter(hub)
 	admin.OnAction(observability.RecordAdminAction)
 	wallet.OnDepositSettled(observability.RecordDeposit)
 
+	settings := service.NewSettingsService(store, cfg.DigitContractsEnabled, log)
+	if err := settings.Bootstrap(ctx); err != nil {
+		return err
+	}
+
 	go feed.Run(ctx)
 	trading.Start(ctx)
+	digits.Start(ctx)
 	go signals.Run(ctx)
 
 	// Refresh the gauges, including the ledger drift number that says whether
@@ -105,10 +112,11 @@ func run() error {
 
 	// --- HTTP ---------------------------------------------------------------
 	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa}
-	deps.Handler.Auth = handlers.NewAuthHandler(auth, cfg)
+	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
 	deps.Handler.Trade = handlers.NewTradeHandler(trading)
+	deps.Handler.Digit = handlers.NewDigitHandler(digits)
 	deps.Handler.Market = handlers.NewMarketHandler(store, feed, signals)
 	deps.Handler.WS = handlers.NewWSHandler(hub, feed, wallet, cfg.CORSOrigins, log)
 	deps.Handler.Admin = handlers.NewAdminHandler(admin, cfg)

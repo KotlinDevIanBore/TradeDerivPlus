@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/EmptyState'
 import { Panel } from '@/components/ui/Panel'
 import { toast } from '@/components/ui/Toast'
-import { useAccountStream, type AccountEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
+import { useAccountStream, type AccountEvent, type DigitSettledEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
 import { usePriceFeed } from '@/hooks/usePriceFeed'
 import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
@@ -102,6 +102,22 @@ export function AppShell() {
         `${trade.symbol_code} closed at ${reason === 'stop_loss' ? 'stop loss' : 'take profit'}`,
         `${signedMoney(trade.pnl)} realised`,
       )
+    }
+
+    // Soft confirmation — Positions/History also update; keep toast brief.
+    if (event.type === 'digit_settled') {
+      const { contract, reason } = event.payload as DigitSettledEvent
+      if (reason === 'auto_void' || contract.status === 'void') {
+        toast.info(`${contract.symbol_code} voided`, 'Stake refunded')
+        return
+      }
+      if (contract.status === 'won') {
+        toast.success(`${contract.symbol_code} won`, signedMoney(contract.pnl))
+        return
+      }
+      if (contract.status === 'lost') {
+        toast.info(`${contract.symbol_code} lost`, signedMoney(contract.pnl))
+      }
     }
   })
 

@@ -26,6 +26,8 @@ const (
 	TxWithdrawal  = "withdrawal"
 	TxTradeOpen   = "trade_open"
 	TxTradeClose  = "trade_close"
+	TxDigitOpen   = "digit_open"
+	TxDigitSettle = "digit_settle"
 	TxBonusCredit = "bonus_credit"
 	// TxAdminAdjustment is a manual balance correction. It is an ordinary
 	// ledger row so the ledger stays the single source of truth; there is no

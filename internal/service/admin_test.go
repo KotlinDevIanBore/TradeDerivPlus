@@ -64,7 +64,7 @@ func TestAdminActionConstantsAreDistinct(t *testing.T) {
 func TestAdjustmentIsItsOwnLedgerType(t *testing.T) {
 	others := []string{
 		models.TxDeposit, models.TxWithdrawal, models.TxTradeOpen,
-		models.TxTradeClose, models.TxBonusCredit,
+		models.TxTradeClose, models.TxDigitOpen, models.TxDigitSettle, models.TxBonusCredit,
 	}
 	for _, o := range others {
 		if models.TxAdminAdjustment == o {

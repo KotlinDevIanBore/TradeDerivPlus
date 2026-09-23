@@ -41,6 +41,7 @@ type harness struct {
 	cfg     *config.Config
 	feed    *service.FeedService
 	trading *service.TradingService
+	digits  *service.DigitService
 	wallet  *service.WalletService
 	admin   *service.AdminService
 	mpesa   *service.MpesaService
@@ -135,11 +136,12 @@ func newHarness(t *testing.T) *harness {
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, noopBroadcaster{}, cfg, log)
 	trading := service.NewTradingService(store, feed, noopBroadcaster{}, log)
+	digits := service.NewDigitService(store, feed, noopBroadcaster{}, log)
 	admin := service.NewAdminService(store, noopBroadcaster{}, cfg, log)
 
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
-		feed: feed, trading: trading, wallet: wallet, admin: admin, mpesa: mpesa, log: log,
+		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa, log: log,
 	}
 }
 

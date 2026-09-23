@@ -1,5 +1,5 @@
 import { dec, type Decimal } from '@/lib/money'
-import type { Trade } from '@/types'
+import type { DigitContract, Trade } from '@/types'
 
 /**
  * When this browser session began. A module constant rather than component
@@ -36,6 +36,50 @@ export function sessionStats(closed: Trade[], since = SESSION_STARTED_AT): Sessi
     if (pnl.isPositive() && !pnl.isZero()) stats.wins += 1
     if (pnl.isNegative()) stats.losses += 1
     stats.realised = stats.realised.plus(pnl)
+  }
+
+  return stats
+}
+
+export interface DigitSessionStats {
+  /** Settled contracts in this browser session (won + lost; voids counted separately). */
+  contracts: number
+  wins: number
+  losses: number
+  voids: number
+  /** Sum of settled pnl since session start (voids are usually 0). */
+  realised: Decimal
+  open: number
+}
+
+/**
+ * Same approximate, session-scoped honesty as sessionStats — from the settled
+ * page already fetched, not a lifetime aggregate.
+ */
+export function digitSessionStats(
+  settled: DigitContract[],
+  openCount: number,
+  since = SESSION_STARTED_AT,
+): DigitSessionStats {
+  const stats: DigitSessionStats = {
+    contracts: 0,
+    wins: 0,
+    losses: 0,
+    voids: 0,
+    realised: dec(0),
+    open: openCount,
+  }
+
+  for (const c of settled) {
+    if (!c.settled_at) continue
+    const at = new Date(c.settled_at).getTime()
+    if (Number.isNaN(at) || at < since) continue
+
+    stats.contracts += 1
+    if (c.status === 'won') stats.wins += 1
+    if (c.status === 'lost') stats.losses += 1
+    if (c.status === 'void') stats.voids += 1
+    if (c.pnl !== null) stats.realised = stats.realised.plus(dec(c.pnl))
   }
 
   return stats

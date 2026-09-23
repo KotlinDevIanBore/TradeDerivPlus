@@ -1,9 +1,10 @@
+import { useMe } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
-import { PANEL_ITEMS } from './panelItems'
-import { PANELS, usePanel } from './usePanel'
+import { chromePanels, PANEL_ITEMS } from './panelItems'
+import { usePanel } from './usePanel'
 
 /**
- * The phone's way into the four panels: one toggle each, icon only.
+ * The phone's way into the panels: one toggle each, icon only.
  *
  * It is not a set of destinations any more, because there is nowhere to go --
  * the surface is the page and the panels open over it. So these are the same
@@ -15,6 +16,8 @@ import { PANELS, usePanel } from './usePanel'
  */
 export function TabBar() {
   const { panel, toggle } = usePanel()
+  const me = useMe()
+  const items = chromePanels(Boolean(me.data?.digit_contracts_enabled))
 
   return (
     <nav
@@ -25,7 +28,7 @@ export function TabBar() {
       )}
     >
       <ul className="flex h-full">
-        {PANELS.map((name) => {
+        {items.map((name) => {
           const { label, icon: Icon } = PANEL_ITEMS[name]
           const active = panel === name
 

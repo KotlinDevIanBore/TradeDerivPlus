@@ -146,11 +146,35 @@ func (s *FeedService) handle(tick models.Tick) {
 // full handle path including observers. Tests use it to pin a price so a
 // position's outcome is deterministic instead of at the mercy of a random walk.
 func (s *FeedService) InjectTick(symbolCode string, price decimal.Decimal) {
+	s.InjectTickAt(symbolCode, price, time.Now().Unix())
+}
+
+// InjectTickAt is InjectTick with an explicit epoch so digit-contract tests can
+// advance "next tick" without waiting a wall-clock second.
+func (s *FeedService) InjectTickAt(symbolCode string, price decimal.Decimal, epoch int64) {
 	s.handle(models.Tick{
 		Symbol: symbolCode,
 		Price:  s.round(symbolCode, price),
-		Epoch:  time.Now().Unix(),
+		Epoch:  epoch,
 	})
+}
+
+// InjectTickQuiet updates latest/history without running observers — used to
+// simulate a missed tick handler while leaving a settlement price for the sweep.
+func (s *FeedService) InjectTickQuiet(symbolCode string, price decimal.Decimal, epoch int64) {
+	tick := models.Tick{
+		Symbol: symbolCode,
+		Price:  s.round(symbolCode, price),
+		Epoch:  epoch,
+	}
+	s.mu.Lock()
+	s.latest[tick.Symbol] = tick
+	buf := append(s.history[tick.Symbol], tick)
+	if len(buf) > tickBufferSize {
+		buf = buf[len(buf)-tickBufferSize:]
+	}
+	s.history[tick.Symbol] = buf
+	s.mu.Unlock()
 }
 
 // Price returns the latest tick for a symbol. ok is false until the first tick

@@ -13,17 +13,19 @@ type Store struct {
 	pool *pgxpool.Pool
 	db   DBTX
 
-	Users        *UserRepo
-	Accounts     *AccountRepo
-	Wallets      *WalletRepo
-	Transactions *TransactionRepo
-	Symbols      *SymbolRepo
-	Trades       *TradeRepo
-	Signals      *SignalRepo
-	Mpesa        *MpesaRepo
-	Admins       *AdminRepo
-	Audit        *AuditRepo
-	KYC          *KYCRepo
+	Users          *UserRepo
+	Accounts       *AccountRepo
+	Wallets        *WalletRepo
+	Transactions   *TransactionRepo
+	Symbols        *SymbolRepo
+	Trades         *TradeRepo
+	DigitContracts *DigitContractRepo
+	Signals        *SignalRepo
+	Mpesa          *MpesaRepo
+	Admins         *AdminRepo
+	Audit          *AuditRepo
+	KYC            *KYCRepo
+	Settings       *SettingsRepo
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -32,19 +34,21 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func newStore(pool *pgxpool.Pool, db DBTX) *Store {
 	return &Store{
-		pool:         pool,
-		db:           db,
-		Users:        &UserRepo{db},
-		Accounts:     &AccountRepo{db},
-		Wallets:      &WalletRepo{db},
-		Transactions: &TransactionRepo{db},
-		Symbols:      &SymbolRepo{db},
-		Trades:       &TradeRepo{db},
-		Signals:      &SignalRepo{db},
-		Mpesa:        &MpesaRepo{db},
-		Admins:       &AdminRepo{db},
-		Audit:        &AuditRepo{db},
-		KYC:          &KYCRepo{db},
+		pool:           pool,
+		db:             db,
+		Users:          &UserRepo{db},
+		Accounts:       &AccountRepo{db},
+		Wallets:        &WalletRepo{db},
+		Transactions:   &TransactionRepo{db},
+		Symbols:        &SymbolRepo{db},
+		Trades:         &TradeRepo{db},
+		DigitContracts: &DigitContractRepo{db},
+		Signals:        &SignalRepo{db},
+		Mpesa:          &MpesaRepo{db},
+		Admins:         &AdminRepo{db},
+		Audit:          &AuditRepo{db},
+		KYC:            &KYCRepo{db},
+		Settings:       &SettingsRepo{db},
 	}
 }
 

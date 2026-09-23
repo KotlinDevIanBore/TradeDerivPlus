@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountsApi } from '@/api/accounts'
 import { authApi } from '@/api/auth'
+import { digitApi, type OpenDigitInput } from '@/api/digit'
 import { marketApi } from '@/api/market'
 import { tradesApi, type OpenTradeInput } from '@/api/trades'
 import { walletApi } from '@/api/wallet'
 import { queryKeys } from '@/lib/queryKeys'
 import { useSessionStore } from '@/store/session'
-import type { AccountType, TradeStatus, TxType } from '@/types'
+import type { AccountType, DigitContractStatus, DigitContractType, DigitSelection, TradeStatus, TxType } from '@/types'
 
 /**
  * Server state lives here. Components receive data and callbacks as props from
@@ -53,7 +54,10 @@ export function useMe() {
       return user
     },
     enabled,
-    staleTime: 300_000,
+    // Short enough that a SQL flag flip shows up without a long wait; matches
+    // the API's settings cache TTL so we do not hammer the DB.
+    staleTime: 10_000,
+    refetchInterval: 10_000,
   })
 }
 
@@ -117,6 +121,49 @@ export function useCloseTrade() {
       queryClient.invalidateQueries({ queryKey: queryKeys.wallet(trade.account_id) })
       queryClient.invalidateQueries({ queryKey: queryKeys.tradeSummary(trade.account_id) })
       queryClient.invalidateQueries({ queryKey: queryKeys.transactions(trade.account_id) })
+    },
+  })
+}
+
+export function useOpenDigits(accountId: string | null, status: DigitContractStatus | 'settled' = 'open') {
+  return useQuery({
+    queryKey: queryKeys.digitContracts(accountId ?? '', status),
+    queryFn: () => digitApi.list(accountId!, status, { limit: 50 }),
+    enabled: Boolean(accountId),
+    refetchInterval: status === 'open' ? 5_000 : false,
+  })
+}
+
+export function useDigitQuote(
+  contractType: DigitContractType,
+  selection: DigitSelection,
+  stake: string,
+  enabled = true,
+) {
+  const stakeOk = Boolean(stake) && Number(stake) > 0
+  return useQuery({
+    queryKey: queryKeys.digitQuote({ contractType, selection, stake }),
+    queryFn: () =>
+      digitApi.quote({
+        contract_type: contractType,
+        selection,
+        stake,
+      }),
+    enabled: enabled && stakeOk,
+    staleTime: 60_000,
+    // Quotes are static-table reads; keep previous numbers while stake edits settle.
+    placeholderData: (prev) => prev,
+  })
+}
+
+export function useOpenDigit() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: OpenDigitInput) => digitApi.open(input),
+    onSuccess: (contract) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.digitContracts(contract.account_id) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.wallet(contract.account_id) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.transactions(contract.account_id) })
     },
   })
 }
