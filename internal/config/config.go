@@ -61,6 +61,20 @@ type Config struct {
 	MpesaCallbackURL    string
 	UseMockMpesa        bool
 
+	// STK reconciliation: the pass that asks Daraja about deposits whose
+	// callback has not arrived. The numbers are PROVISIONAL — guesses at what
+	// Daraja tolerates, to be replaced once scripts/daraja_probe.py has been run
+	// against the sandbox (stk-reconciliation-plan.md §2.5). The shape is not
+	// provisional: never query immediately, widen, stop eventually.
+	//
+	// MinAge is floored at 60s in Load. In mock mode the simulated callback
+	// settles a deposit 4–9s after the push; the floor is what keeps the pass off
+	// every deposit the mock is about to resolve, and so keeps smoke.py and the
+	// browser suite untouched.
+	MpesaReconcileEvery  time.Duration
+	MpesaReconcileMinAge time.Duration
+	MpesaReconcileGiveUp time.Duration
+
 	// Money
 	// Deposits arrive in KES, wallets are denominated in USD (gap G8).
 	KESPerUSD           float64
@@ -97,6 +111,12 @@ type Config struct {
 	MetricsToken      string
 }
 
+// MpesaReconcileMinAgeFloor is the least MPESA_RECONCILE_MIN_AGE Load will
+// accept. Below it the pass could reach a deposit the mock callback is still
+// about to settle; above it there is nothing to protect, so it is a floor and
+// not a fixed value.
+const MpesaReconcileMinAgeFloor = 60 * time.Second
+
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
@@ -132,6 +152,10 @@ func Load() (*Config, error) {
 		MpesaPasskey:        getEnv("MPESA_PASSKEY", ""),
 		MpesaCallbackURL:    getEnv("MPESA_CALLBACK_URL", "http://localhost:8080/api/v1/mpesa/callback"),
 		UseMockMpesa:        getBool("USE_MOCK_MPESA", true),
+
+		MpesaReconcileEvery:  getDuration("MPESA_RECONCILE_EVERY", time.Minute),
+		MpesaReconcileMinAge: getDuration("MPESA_RECONCILE_MIN_AGE", 3*time.Minute),
+		MpesaReconcileGiveUp: getDuration("MPESA_RECONCILE_GIVE_UP", 24*time.Hour),
 
 		KESPerUSD:           getFloat("KES_PER_USD", 129.50),
 		MinDepositKES:       getFloat("MIN_DEPOSIT_KES", 50),
@@ -176,6 +200,16 @@ func Load() (*Config, error) {
 	}
 	if !c.UseMockMpesa && (c.MpesaConsumerKey == "" || c.MpesaPasskey == "") {
 		return nil, fmt.Errorf("MPESA_CONSUMER_KEY and MPESA_PASSKEY required when USE_MOCK_MPESA=false")
+	}
+	if c.MpesaReconcileMinAge < MpesaReconcileMinAgeFloor {
+		c.MpesaReconcileMinAge = MpesaReconcileMinAgeFloor
+	}
+	if c.MpesaReconcileEvery <= 0 {
+		return nil, fmt.Errorf("MPESA_RECONCILE_EVERY must be positive")
+	}
+	if c.MpesaReconcileGiveUp <= c.MpesaReconcileMinAge {
+		return nil, fmt.Errorf("MPESA_RECONCILE_GIVE_UP (%s) must be longer than MPESA_RECONCILE_MIN_AGE (%s), or nothing is ever queried",
+			c.MpesaReconcileGiveUp, c.MpesaReconcileMinAge)
 	}
 	return c, nil
 }

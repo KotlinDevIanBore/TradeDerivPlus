@@ -35,13 +35,35 @@ const (
 	SettledByCallback = "callback"
 )
 
+// stkQuerier is the one thing the reconciliation pass needs from Daraja. The
+// real client satisfies it directly; mock mode gets a stub that never resolves
+// anything, so the pass runs everywhere and settles only where it is real.
+type stkQuerier interface {
+	STKQuery(ctx context.Context, checkoutID string) (mpesaclient.QueryOutcome, error)
+}
+
+// unresolvedQuerier is mock mode's Daraja: every deposit is still processing.
+// Settlement in mock mode belongs to simulateCallback, and this stub cannot
+// take it — an Unresolved outcome advances the backoff and nothing else. What
+// mock mode exercises is the listing, the backoff and MarkQueried, the parts of
+// the pass most likely to rot unseen.
+type unresolvedQuerier struct{}
+
+func (unresolvedQuerier) STKQuery(context.Context, string) (mpesaclient.QueryOutcome, error) {
+	return mpesaclient.QueryOutcome{
+		Status:     mpesaclient.QueryUnresolved,
+		ResultDesc: "mock: the callback is on its way",
+	}, nil
+}
+
 // MpesaService owns the STK push lifecycle and the mpesa_requests table.
 // It knows nothing about wallets; it reports outcomes through OnResult.
 type MpesaService struct {
-	store  *repository.Store
-	client *mpesaclient.Client
-	cfg    *config.Config
-	log    *slog.Logger
+	store   *repository.Store
+	client  *mpesaclient.Client
+	querier stkQuerier
+	cfg     *config.Config
+	log     *slog.Logger
 
 	onResult func(ctx context.Context, r DepositResult)
 
@@ -57,10 +79,14 @@ type MpesaService struct {
 // return path rather than after it.
 func (s *MpesaService) SetAfterInitiateForTest(fn func(checkoutID string)) { s.afterInitiate = fn }
 
+// SetQuerierForTest replaces what the reconciliation pass asks. Tests script
+// it per checkout id; production never calls this.
+func (s *MpesaService) SetQuerierForTest(q stkQuerier) { s.querier = q }
+
 func NewMpesaService(store *repository.Store, cfg *config.Config, log *slog.Logger) *MpesaService {
-	var client *mpesaclient.Client
+	s := &MpesaService{store: store, cfg: cfg, log: log, querier: unresolvedQuerier{}}
 	if !cfg.UseMockMpesa {
-		client = mpesaclient.New(mpesaclient.Options{
+		s.client = mpesaclient.New(mpesaclient.Options{
 			BaseURL:        cfg.MpesaBaseURL,
 			ConsumerKey:    cfg.MpesaConsumerKey,
 			ConsumerSecret: cfg.MpesaConsumerSecret,
@@ -68,8 +94,9 @@ func NewMpesaService(store *repository.Store, cfg *config.Config, log *slog.Logg
 			Passkey:        cfg.MpesaPasskey,
 			CallbackURL:    cfg.MpesaCallbackURL,
 		})
+		s.querier = s.client
 	}
-	return &MpesaService{store: store, client: client, cfg: cfg, log: log}
+	return s
 }
 
 // OnResult registers the settlement handler. The wallet service supplies it.
@@ -98,6 +125,10 @@ func (s *MpesaService) InitiateSTK(ctx context.Context, transactionID uuid.UUID,
 		checkoutID, merchantID = resp.CheckoutRequestID, resp.MerchantRequestID
 	}
 
+	// The first query is scheduled at insert, min-age out, so the row is never
+	// eligible before the callback has had its chance. Nil here would mean the
+	// pass never looks at it.
+	nextQuery := time.Now().Add(s.cfg.MpesaReconcileMinAge)
 	req := &models.MpesaRequest{
 		TransactionID:     transactionID,
 		CheckoutRequestID: checkoutID,
@@ -105,6 +136,7 @@ func (s *MpesaService) InitiateSTK(ctx context.Context, transactionID uuid.UUID,
 		PhoneNumber:       phone,
 		Amount:            amountKES,
 		Status:            models.StatusPending,
+		NextQueryAt:       &nextQuery,
 	}
 	if err := s.store.Mpesa.Insert(ctx, req); err != nil {
 		return "", err

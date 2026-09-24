@@ -163,7 +163,10 @@ func run() error {
 	go func() {
 		log.Info("api listening",
 			"port", cfg.Port, "env", cfg.Env,
-			"mock_feed", cfg.UseMockFeed, "mock_mpesa", cfg.UseMockMpesa)
+			"mock_feed", cfg.UseMockFeed, "mock_mpesa", cfg.UseMockMpesa,
+			"mpesa_reconcile_every", cfg.MpesaReconcileEvery,
+			"mpesa_reconcile_min_age", cfg.MpesaReconcileMinAge,
+			"mpesa_reconcile_give_up", cfg.MpesaReconcileGiveUp)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen failed", "err", err)
 			stop()

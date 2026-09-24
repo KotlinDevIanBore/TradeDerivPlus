@@ -134,6 +134,13 @@ type MpesaRequest struct {
 	ResultCode        *int            `json:"result_code"`
 	ResultDesc        *string         `json:"result_desc"`
 	CreatedAt         time.Time       `json:"created_at"`
+
+	// Reconciliation state (migration 0007), for a pending row whose callback
+	// has not arrived. ReconcileAttempts counts the queries Daraja answered
+	// without resolving it; NextQueryAt is when the pass may next ask. Nil only
+	// on rows that were already terminal when 0007 ran.
+	ReconcileAttempts int        `json:"reconcile_attempts"`
+	NextQueryAt       *time.Time `json:"next_query_at"`
 }
 
 type Symbol struct {

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -38,6 +39,7 @@ import (
 type harness struct {
 	t        *testing.T
 	ctx      context.Context
+	pool     *pgxpool.Pool
 	store    *repository.Store
 	cfg      *config.Config
 	feed     *service.FeedService
@@ -91,7 +93,9 @@ func TestMain(m *testing.M) {
 }
 
 // newHarness gives the test a fresh schema and wired services.
-func newHarness(t *testing.T) *harness {
+// freshPool connects to the shared container and empties it: each test starts
+// from no schema and no rows, and applies whatever migrations it needs.
+func freshPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 
@@ -101,13 +105,19 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(pool.Close)
 
-	// Drop and re-apply so each test starts from a known schema and no rows.
 	if _, err := pool.Exec(ctx, `
 		DROP SCHEMA public CASCADE;
 		CREATE SCHEMA public;`); err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
+	return pool
+}
 
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	ctx := context.Background()
+
+	pool := freshPool(t)
 	root := repoRoot(t)
 	if err := repository.Migrate(ctx, pool, filepath.Join(root, "migrations")); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -123,6 +133,13 @@ func newHarness(t *testing.T) *harness {
 		MaxDepositKES:       150000,
 		DemoStartingBalance: 10000,
 		UseMockMpesa:        true,
+
+		// The production defaults. Load's 60s floor is not applied here — the
+		// harness builds the struct directly — so a test that wants the pass
+		// to reach a fresh deposit lowers MinAge itself, deliberately.
+		MpesaReconcileEvery:  time.Minute,
+		MpesaReconcileMinAge: 3 * time.Minute,
+		MpesaReconcileGiveUp: 24 * time.Hour,
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -180,6 +197,7 @@ func newHarness(t *testing.T) *harness {
 
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
+		pool: pool,
 		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
 		bots: bots, settings: settings, events: events, log: log,
 	}
