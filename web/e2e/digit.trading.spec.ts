@@ -4,8 +4,12 @@ import {
   newPhone,
   pillAmount,
   register,
+  requireFeatures,
   waitForDigitTicket,
 } from './helpers'
+
+// Fails in seconds if this job's API has the digit surface off.
+test.beforeAll(() => requireFeatures('digit'))
 
 /**
  * The digit surface, which is what the app is when digit_contracts_enabled is on

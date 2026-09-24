@@ -6,8 +6,13 @@ import {
   openPanel,
   panelOf,
   register,
+  requireFeatures,
   waitForDigitSurface,
 } from './helpers'
+
+// Fails in seconds if this job's API has the digit surface off. File scope:
+// this file has three describe blocks and beforeAll is per block.
+test.beforeAll(() => requireFeatures('digit'))
 
 /**
  * The chrome in digit mode. Signals is hidden here — its entry/stop-loss/

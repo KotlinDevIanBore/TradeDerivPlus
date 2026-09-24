@@ -197,7 +197,11 @@ jobs:
 
       - name: Browser tests
         working-directory: web
-        run: npx playwright test
+        # Named explicitly. A bare `npx playwright test` runs every project in
+        # the config, digit-mobile and digit-desktop included, and this job's API
+        # has the digit surface off — so they cannot pass here and are covered by
+        # the e2e-digit job below against its own database.
+        run: npx playwright test --project=mobile --project=desktop
         env:
           VITE_API_URL: http://localhost:8080/api/v1
           VITE_WS_URL: ws://localhost:8080/api/v1/ws

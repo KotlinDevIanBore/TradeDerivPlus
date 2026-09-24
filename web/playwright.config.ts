@@ -26,12 +26,20 @@ export default defineConfig({
   /**
    * Two sets of projects, because the app has two trading surfaces and the flag
    * that chooses between them is server state, not a per-test option. The digit
-   * projects need an API started with DIGIT_CONTRACTS_ENABLED=true, so they are
-   * not part of a default run and CI gives them their own job with their own
-   * database — the flag row in app_settings is seeded once and never overwritten,
-   * so one process cannot serve both modes.
+   * projects need an API started with DIGIT_CONTRACTS_ENABLED=true, and the
+   * others need it off, so CI gives each its own job with its own database — the
+   * flag row in app_settings is seeded once and never overwritten, so one
+   * process cannot serve both modes.
    *
-   *   npx playwright test                                    → the CFD surface
+   * **Always name the projects.** A bare `npx playwright test` runs all four,
+   * which means running half of them against an API configured for the other
+   * half: every one of those waits out its timeout for a surface that will never
+   * render. Playwright has no way to keep a project out of an unfiltered run, so
+   * the filter has to come from the command — and the specs now refuse to start
+   * when their surface is off, which is what makes the mistake legible instead
+   * of merely slow. See requireFeatures in e2e/helpers.ts.
+   *
+   *   npx playwright test --project=mobile --project=desktop        → CFD
    *   npx playwright test --project=digit-mobile --project=digit-desktop
    */
   projects: [

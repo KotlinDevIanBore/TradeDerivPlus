@@ -145,6 +145,44 @@ async function submitSignup(page: Page) {
   throw new Error('Signup was rate limited four times over. Is the API set up for a test run?')
 }
 
+/**
+ * Refuses to run a spec whose feature is switched off on the API.
+ *
+ * These suites are split across two CI jobs because the surfaces are chosen by
+ * server state rather than by a per-test option, and a job pointed at the wrong
+ * one does not fail in a way that says so: every test waits out its timeout for
+ * an element that will never render, which is minutes of "element not found"
+ * for a single misconfiguration.
+ *
+ * Deliberately a failure and not a skip. A suite that quietly passes by testing
+ * nothing is worse than one that fails, and the whole reason these tests exist
+ * is that nobody was checking the digit surface at all.
+ */
+export async function requireFeatures(...needed: Array<'digit' | 'bot'>) {
+  const fixture = await registerViaApi(newPhone())
+  const res = await api('/auth/me', { token: fixture.access_token })
+  const me = (await res.json()) as {
+    digit_contracts_enabled?: boolean
+    bot_enabled?: boolean
+  }
+
+  if (needed.includes('digit') && !me.digit_contracts_enabled) {
+    throw new Error(
+      'The digit trading surface is off for this API, so none of these tests can pass. ' +
+        'They belong to the "End to end (digit)" job, which starts the API with ' +
+        'DIGIT_CONTRACTS_ENABLED=true — if this is the CFD job, it is selecting projects ' +
+        'it should not be running.',
+    )
+  }
+  if (needed.includes('bot') && !me.bot_enabled) {
+    throw new Error(
+      'Automated trading is off for this API, so none of these tests can pass. ' +
+        'Start it with BOT_ENABLED=true (CI sets this on both e2e jobs), or turn it ' +
+        'back on from the admin console if a kill switch left it off.',
+    )
+  }
+}
+
 /** Registers through the UI, which is also how the signup path gets covered. */
 export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.goto('/register')
