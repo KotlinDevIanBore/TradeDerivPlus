@@ -263,6 +263,12 @@ jobs:
           USE_MOCK_MPESA: "true"
           # The whole point of this job. Production defaults to this when unset.
           DIGIT_CONTRACTS_ENABLED: "true"
+          # digit.auto.spec.ts needs the feature on, and this job's database is
+          # created fresh, so nothing has turned it on already: BOT_ENABLED
+          # defaults to false and Bootstrap seeds whatever it says. Set here
+          # rather than left to cmd/seed, which this job does not run. Real-money
+          # runs stay off, as they are everywhere.
+          BOT_ENABLED: "true"
           # Same loosening as the CFD job: the suite registers a user per test,
           # and the auth limiter is keyed per IP on an unauthenticated route, so
           # the production burst of ten is reached partway through a run. The

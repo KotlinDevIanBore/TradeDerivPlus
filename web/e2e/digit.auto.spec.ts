@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   accountPill,
+  api,
   closePanel,
   newPhone,
   openPanel,
@@ -8,6 +9,7 @@ import {
   pillAmount,
   placedCount,
   register,
+  registerViaApi,
   startAutoRun,
   waitForDigitTicket,
 } from './helpers'
@@ -21,6 +23,28 @@ import {
  * when it stops.
  */
 test.describe('Automated trading', () => {
+  /**
+   * Nothing in this file can pass with the feature off, and with it off every
+   * test in it fails the same way: waiting sixty seconds for a mode toggle that
+   * is never rendered. Five of those, twice over with CI's retry, is eighteen
+   * minutes to say one thing.
+   *
+   * So the one thing gets said once, up front. Not a skip — a suite that quietly
+   * passes by testing nothing is worse than one that fails.
+   */
+  test.beforeAll(async () => {
+    const fixture = await registerViaApi(newPhone())
+    const res = await api('/auth/me', { token: fixture.access_token })
+    const me = (await res.json()) as { bot_enabled?: boolean }
+    if (!me.bot_enabled) {
+      throw new Error(
+        'Automated trading is off for this API, so none of these tests can pass. ' +
+          'Start it with BOT_ENABLED=true (CI sets this on the digit job), or turn it ' +
+          'back on from the admin console if a kill switch left it off.',
+      )
+    }
+  })
+
   test('carries the mode on the URL, and leaves the instrument alone', async ({ page }) => {
     await register(page, newPhone())
     await waitForDigitTicket(page)
