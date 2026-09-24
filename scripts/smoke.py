@@ -58,6 +58,26 @@ def check(label, condition, detail=""):
     print(f"  [{mark}] {label}" + (f"  {detail}" if detail and not condition else ""))
 
 
+def mpesa_is_mocked():
+    """Whether the target API simulates M-Pesa. Asked, not assumed.
+
+    The deposit below asks for KES 12,950 against a phone number this script
+    invented at random. Against real Daraja credentials that is an STK push to a
+    stranger for about thirteen thousand shillings, once per run — it would not
+    charge you, it would prompt a member of the public to pay you.
+
+    The env var on this machine says nothing about a remote target, so the
+    target is asked. Fails closed: an API that cannot be reached, or that
+    answers anything other than a plain true, is treated as live.
+    """
+    root = BASE[: -len("/api/v1")] if BASE.endswith("/api/v1") else BASE
+    try:
+        with urllib.request.urlopen(f"{root}/health", timeout=10) as r:
+            return json.loads(r.read() or "{}").get("mock_mpesa") is True
+    except Exception:
+        return False
+
+
 print(f"Smoke test against {BASE}\n")
 
 # --- Auth ------------------------------------------------------------------
@@ -184,6 +204,10 @@ check("stake plus pnl is returned on close",
       f"{after_close['bonus_balance']} vs expected {expected:.2f}")
 
 # --- Wallet: deposits ------------------------------------------------------
+# Everything above this line is free. Everything below it can cost real money if
+# the target is wired to Daraja, so the target is asked first.
+MOCK_MPESA = mpesa_is_mocked()
+
 print("\nDEPOSIT (mock M-Pesa)")
 _, demo_dep = call("POST", "/wallet/deposit",
                    {"account_id": demo_account, "amount_kes": "1000", "phone_number": phone},
@@ -200,31 +224,41 @@ _, badphone = call("POST", "/wallet/deposit",
                    expect=422)
 check("non-Safaricom number is refused", badphone.get("error", {}).get("field") == "phone_number")
 
-_, dep = call("POST", "/wallet/deposit",
-              {"account_id": real_account, "amount_kes": "12950", "phone_number": phone}, expect=202)
-check("deposit starts pending", dep["status"] == "pending")
-check("KES converts to USD", abs(float(dep["amount_usd"]) - 100.0) < 0.01,
-      f"got {dep['amount_usd']}")
+# The rejections above cost nothing — none of them reaches Daraja. This one
+# does, so it only runs against an API that has told us it is simulating.
+if not MOCK_MPESA:
+    print("  [STOP] this API is not in mock M-Pesa mode, so the deposit was not sent.")
+    print(f"         It would have pushed KES 12,950 to {phone}, a number this")
+    print("         script made up. Point it at an API started with")
+    print("         USE_MOCK_MPESA=true, or place a live deposit by hand.")
+    failures.append("deposit not exercised: the target is not in mock M-Pesa mode")
+else:
+    _, dep = call("POST", "/wallet/deposit",
+                  {"account_id": real_account, "amount_kes": "12950", "phone_number": phone},
+                  expect=202)
+    check("deposit starts pending", dep["status"] == "pending")
+    check("KES converts to USD", abs(float(dep["amount_usd"]) - 100.0) < 0.01,
+          f"got {dep['amount_usd']}")
 
-tx_id = dep["transaction_id"]
-print("  waiting for the simulated callback...")
-final = None
-for _ in range(40):
-    time.sleep(0.5)
-    _, tx = call("GET", f"/wallet/transactions/{tx_id}", expect=200)
-    if tx["status"] != "pending":
-        final = tx
-        break
-check("deposit settles", final is not None, "still pending after 20s")
-if final:
-    print(f"       settled as: {final['status']}  ({final.get('metadata', {}).get('reason', '')})")
-    _, rw = call("GET", f"/accounts/{real_account}/wallet", expect=200)
-    if final["status"] == "completed":
-        check("completed deposit credits the real balance", float(rw["real_balance"]) == 100.0,
-              f"got {rw['real_balance']}")
-    else:
-        check("failed deposit credits nothing", float(rw["real_balance"]) == 0.0,
-              f"got {rw['real_balance']}")
+    tx_id = dep["transaction_id"]
+    print("  waiting for the simulated callback...")
+    final = None
+    for _ in range(40):
+        time.sleep(0.5)
+        _, tx = call("GET", f"/wallet/transactions/{tx_id}", expect=200)
+        if tx["status"] != "pending":
+            final = tx
+            break
+    check("deposit settles", final is not None, "still pending after 20s")
+    if final:
+        print(f"       settled as: {final['status']}  ({final.get('metadata', {}).get('reason', '')})")
+        _, rw = call("GET", f"/accounts/{real_account}/wallet", expect=200)
+        if final["status"] == "completed":
+            check("completed deposit credits the real balance", float(rw["real_balance"]) == 100.0,
+                  f"got {rw['real_balance']}")
+        else:
+            check("failed deposit credits nothing", float(rw["real_balance"]) == 0.0,
+                  f"got {rw['real_balance']}")
 
 # --- Wallet: withdrawals ---------------------------------------------------
 print("\nWITHDRAW")

@@ -108,10 +108,6 @@ func (s *MpesaService) HandleCallback(ctx context.Context, cb mpesaclient.Callba
 	if err != nil {
 		return err
 	}
-	if req.Status != models.StatusPending {
-		s.log.Info("duplicate m-pesa callback ignored", "checkout_id", stk.CheckoutRequestID)
-		return nil
-	}
 
 	success := stk.ResultCode == 0
 	status := models.StatusFailed
@@ -119,8 +115,18 @@ func (s *MpesaService) HandleCallback(ctx context.Context, cb mpesaclient.Callba
 		status = models.StatusCompleted
 	}
 
-	if err := s.store.Mpesa.UpdateResult(ctx, stk.CheckoutRequestID, status, stk.ResultCode, stk.ResultDesc); err != nil {
+	// The write decides, not the read. Checking req.Status here and then writing
+	// would be two statements with a gap between them, and Daraja retries: two
+	// deliveries for one push can both read 'pending' and both go on to settle
+	// the same deposit. The guard is inside the UPDATE, so exactly one caller is
+	// told it won and only that one credits anything.
+	won, err := s.store.Mpesa.UpdateResult(ctx, stk.CheckoutRequestID, status, stk.ResultCode, stk.ResultDesc)
+	if err != nil {
 		return err
+	}
+	if !won {
+		s.log.Info("duplicate m-pesa callback ignored", "checkout_id", stk.CheckoutRequestID)
+		return nil
 	}
 
 	if s.onResult != nil {

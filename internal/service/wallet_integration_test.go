@@ -3,6 +3,8 @@
 package service_test
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -411,4 +413,112 @@ func TestCallbackForAnUnknownCheckoutIsRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("a callback for a request we never made was accepted")
 	}
+}
+
+// Daraja retries callbacks, and a retry can overlap the delivery it is retrying.
+// Sequential duplicates are covered above; this is the case that used to slip
+// through — two deliveries for one push, at once, each reading 'pending' before
+// either had written.
+//
+// The guard is in the UPDATE rather than in a preceding read, so the database
+// picks the winner. Exactly one credit must land no matter how many callers
+// arrive together.
+func TestConcurrentCallbacksCreditExactlyOnce(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.newUser(decimal.Zero)
+
+	const callers = 8
+
+	for attempt := 0; attempt < 5; attempt++ {
+		txID, checkoutID := h.pendingDeposit(userID, accountID, 12950)
+
+		// Released together, so they contend rather than queue.
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		errs := make(chan error, callers)
+		for i := 0; i < callers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				if err := h.mpesa.HandleCallback(context.Background(),
+					darajaCallback(checkoutID, 0, "processed", "QK12345678")); err != nil {
+					errs <- err
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("callback %d: %v", attempt, err)
+		}
+
+		// One credit per deposit, so the balance is exactly the number of
+		// deposits so far times $100 — not eight times it.
+		want := decimal.NewFromInt(int64(100 * (attempt + 1)))
+		if w := h.wallet_(accountID); !w.RealBalance.Equal(want) {
+			t.Fatalf("after %d concurrent callbacks on deposit %d the balance is %s, want %s",
+				callers, attempt+1, w.RealBalance, want)
+		}
+
+		tx, err := h.store.Transactions.GetByID(h.ctx, txID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tx.Status != models.StatusCompleted {
+			t.Fatalf("transaction is %q after the callbacks", tx.Status)
+		}
+
+		// The ledger is the source of truth, so it has to agree too: a second
+		// credit with no ledger row would be caught here and nowhere else.
+		h.assertReconciled(accountID)
+	}
+}
+
+// The same race on the failure path. A failed deposit credits nothing, so a
+// double settle cannot create money — but it can fire the result notification
+// twice and tell a user their deposit failed twice, and the count is the thing
+// under test.
+func TestConcurrentFailureCallbacksSettleOnce(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.newUser(decimal.Zero)
+
+	settled := make(chan string, 256)
+	h.wallet.OnDepositSettled(func(status string) { settled <- status })
+
+	const callers = 8
+	const deposits = 5
+	for attempt := 0; attempt < deposits; attempt++ {
+		_, checkoutID := h.pendingDeposit(userID, accountID, 1000)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := 0; i < callers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				_ = h.mpesa.HandleCallback(context.Background(),
+					darajaCallback(checkoutID, 1032, "Request cancelled by user", ""))
+			}()
+		}
+		close(start)
+		wg.Wait()
+	}
+
+	// Give any straggler notification a moment to arrive before counting.
+	time.Sleep(200 * time.Millisecond)
+	close(settled)
+	n := 0
+	for range settled {
+		n++
+	}
+	if n != deposits {
+		t.Fatalf("%d settlement notifications for %d failed deposits, want one each", n, deposits)
+	}
+	if w := h.wallet_(accountID); !w.Total().IsZero() {
+		t.Fatalf("a failed deposit credited %s", w.Total())
+	}
+	h.assertReconciled(accountID)
 }

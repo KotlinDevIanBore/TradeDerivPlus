@@ -52,8 +52,14 @@ func New(d Deps) *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// mock_mpesa is here so a test script can refuse to run a deposit against an
+	// API wired to real Daraja credentials. A live STK push charges somebody real
+	// money, and the scripts that exercise deposits invent their phone numbers —
+	// so the only safe default is for them to fail closed when they cannot tell.
+	// It discloses nothing: on a real deployment the answer is false, which is
+	// what anyone would assume anyway.
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "mock_mpesa": d.Config.UseMockMpesa})
 	})
 
 	// Metrics are authenticated: the numbers here include deposit volumes and

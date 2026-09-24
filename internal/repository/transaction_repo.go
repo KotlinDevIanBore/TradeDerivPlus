@@ -26,6 +26,25 @@ func (r *TransactionRepo) Insert(ctx context.Context, t *models.Transaction) err
 	return mapErr(err)
 }
 
+// UpdateStatusIfPending moves a transaction off 'pending' and reports whether
+// this call was the one that moved it.
+//
+// For money that arrives asynchronously, the guard is the difference between
+// crediting once and crediting per delivery: an M-Pesa callback can be retried,
+// and a caller that checked the status in a separate statement can lose the race
+// between the check and the write. Here the check and the write are the same
+// statement, so exactly one caller sees true.
+func (r *TransactionRepo) UpdateStatusIfPending(ctx context.Context, id uuid.UUID, status string, metadata map[string]any) (bool, error) {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE transactions SET status = $2, metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb
+		 WHERE id = $1 AND status = 'pending'`,
+		id, status, metadata)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (r *TransactionRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, metadata map[string]any) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE transactions SET status = $2, metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb WHERE id = $1`,

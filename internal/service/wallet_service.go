@@ -234,10 +234,14 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 	}
 
 	if !r.Success {
-		if err := s.store.Transactions.UpdateStatus(ctx, tx.ID, models.StatusFailed,
-			map[string]any{"reason": r.Reason}); err != nil {
+		won, err := s.store.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusFailed,
+			map[string]any{"reason": r.Reason})
+		if err != nil {
 			s.log.Error("settle deposit: mark failed", "err", err)
 			return
+		}
+		if !won {
+			return // another delivery of the same callback got here first
 		}
 		if s.onDepositSettled != nil {
 			s.onDepositSettled(models.StatusFailed)
@@ -251,24 +255,38 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 		return
 	}
 
+	// The status check above is a fast path, not the guarantee. This is the
+	// guarantee: the ledger row moves off 'pending' and the wallet is credited in
+	// one transaction, and the move is conditional on it still being pending — so
+	// a second delivery that got past the read finds nothing to move and credits
+	// nothing. Money is the one place where two guards are not one too many.
 	var wallet *models.Wallet
+	credited := false
 	err = s.store.WithTx(ctx, func(st *repository.Store) error {
 		meta := map[string]any{"reason": r.Reason}
 		if r.Receipt != "" {
 			meta["receipt"] = r.Receipt
 		}
-		if err := st.Transactions.UpdateStatus(ctx, tx.ID, models.StatusCompleted, meta); err != nil {
+		won, err := st.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusCompleted, meta)
+		if err != nil {
 			return err
+		}
+		if !won {
+			return nil
 		}
 		w, err := st.Wallets.Adjust(ctx, tx.AccountID, models.BalanceReal, tx.Amount)
 		if err != nil {
 			return err
 		}
-		wallet = w
+		wallet, credited = w, true
 		return nil
 	})
 	if err != nil {
 		s.log.Error("settle deposit: credit failed", "id", tx.ID, "err", err)
+		return
+	}
+	if !credited {
+		s.log.Info("duplicate deposit settlement ignored", "transaction", tx.ID)
 		return
 	}
 

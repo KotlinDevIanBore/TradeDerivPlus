@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test'
-import { newPhone, openPanel, register } from './helpers'
+import { newPhone, openPanel, register, requireMockMpesa } from './helpers'
+
+// Before anything in this file registers a user or fills an amount. File scope,
+// not inside the describe, so it covers every test here however many are added.
+test.beforeAll(requireMockMpesa)
 
 test.describe('Depositing with M-Pesa', () => {
   test('walks amount, waiting and result, and settles without a reload', async ({ page }) => {

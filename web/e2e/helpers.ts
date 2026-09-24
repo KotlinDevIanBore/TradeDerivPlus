@@ -183,6 +183,36 @@ export async function requireFeatures(...needed: Array<'digit' | 'bot'>) {
   }
 }
 
+/**
+ * Refuses to run a spec that would put a real M-Pesa charge on somebody.
+ *
+ * The deposit suite drives the sheet for KES 12,950 against a phone number the
+ * helper invented. Simulated, that is a test. Against real Daraja credentials it
+ * is an STK push to a stranger for about thirteen thousand shillings, on every
+ * CI run — and nothing in the spec itself can tell the difference, because the
+ * UI is identical either way.
+ *
+ * So the API is asked. Fails closed: unreachable, or anything other than a
+ * plain true, is treated as live.
+ */
+export async function requireMockMpesa() {
+  const root = API.replace(/\/api\/v1$/, '')
+  let mocked: unknown
+  try {
+    const res = await fetch(`${root}/health`)
+    mocked = ((await res.json()) as { mock_mpesa?: unknown }).mock_mpesa
+  } catch {
+    mocked = undefined
+  }
+  if (mocked !== true) {
+    throw new Error(
+      'This API is not in mock M-Pesa mode, so this suite will not run: it would send a real ' +
+        'STK push for KES 12,950 to a phone number it made up. Start the API with ' +
+        'USE_MOCK_MPESA=true, which is what both CI e2e jobs do.',
+    )
+  }
+}
+
 /** Registers through the UI, which is also how the signup path gets covered. */
 export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.goto('/register')

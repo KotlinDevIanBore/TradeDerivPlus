@@ -32,9 +32,21 @@ func (r *MpesaRepo) GetByCheckoutID(ctx context.Context, checkoutID string) (*mo
 	return &m, nil
 }
 
-func (r *MpesaRepo) UpdateResult(ctx context.Context, checkoutID, status string, resultCode int, resultDesc string) error {
-	_, err := r.db.Exec(ctx, `
+// UpdateResult records a callback's outcome, and reports whether this call was
+// the one that recorded it.
+//
+// The status guard is what makes that answer trustworthy, and it is why this
+// returns a boolean rather than just an error: Daraja retries callbacks, so two
+// deliveries for one push can arrive at once, and a caller that read 'pending'
+// before either wrote would otherwise settle the same deposit twice. The
+// database decides the winner; the loser gets false and credits nothing.
+func (r *MpesaRepo) UpdateResult(ctx context.Context, checkoutID, status string, resultCode int, resultDesc string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
 		UPDATE mpesa_requests SET status = $2, result_code = $3, result_desc = $4
-		WHERE checkout_request_id = $1`, checkoutID, status, resultCode, resultDesc)
-	return mapErr(err)
+		WHERE checkout_request_id = $1 AND status = 'pending'`,
+		checkoutID, status, resultCode, resultDesc)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
