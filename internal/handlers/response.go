@@ -64,6 +64,18 @@ func fail(c *gin.Context, err error) {
 		respondErr(c, http.StatusConflict, err.Error(), "trade_not_open", "")
 	case errors.Is(err, service.ErrDigitNotOpen):
 		respondErr(c, http.StatusConflict, err.Error(), "digit_not_open", "")
+	case errors.Is(err, service.ErrTooManyOpen):
+		respondErr(c, http.StatusConflict, err.Error(), "too_many_open", "")
+	case errors.Is(err, service.ErrBotDisabled):
+		respondErr(c, http.StatusForbidden, err.Error(), "bot_disabled", "")
+	case errors.Is(err, service.ErrBotRealMoneyDisabled):
+		respondErr(c, http.StatusForbidden, err.Error(), "bot_real_money_disabled", "")
+	case errors.Is(err, service.ErrBotRunActive):
+		respondErr(c, http.StatusConflict, err.Error(), "bot_run_active", "")
+	case errors.Is(err, service.ErrBotCapacity):
+		respondErr(c, http.StatusServiceUnavailable, err.Error(), "bot_capacity", "")
+	case errors.Is(err, service.ErrBotRunNotLive):
+		respondErr(c, http.StatusConflict, err.Error(), "bot_run_not_live", "")
 	case errors.Is(err, service.ErrAccountFrozen):
 		respondErr(c, http.StatusForbidden, err.Error(), "account_frozen", "")
 	case errors.Is(err, service.ErrAdminExists):

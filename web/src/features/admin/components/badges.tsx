@@ -46,6 +46,14 @@ const actionTone: Record<AuditAction, string> = {
   manual_adjustment: 'border-accent/40 text-accent',
   kyc_approve: 'border-profit/40 text-profit',
   kyc_reject: 'border-accent/40 text-accent',
+  // Both stop someone trading, so both read as destructive. The kill switch is
+  // the platform-wide one and is not distinguished by colour — the label is what
+  // separates them, and colour is for the kind of day, not the blast radius.
+  bot_kill: 'border-accent/40 text-accent',
+  bot_run_stop: 'border-accent/40 text-accent',
+  // Green, like unfreeze: reading down the log, this is the row that says the
+  // outage ended.
+  bot_enable: 'border-profit/40 text-profit',
 }
 
 const actionLabel: Record<AuditAction, string> = {
@@ -54,6 +62,9 @@ const actionLabel: Record<AuditAction, string> = {
   manual_adjustment: 'Adjusted balance',
   kyc_approve: 'Approved KYC',
   kyc_reject: 'Rejected KYC',
+  bot_kill: 'Stopped all auto runs',
+  bot_enable: 'Turned auto runs back on',
+  bot_run_stop: 'Stopped an auto run',
 }
 
 export function ActionBadge({ action }: { action: AuditAction }) {

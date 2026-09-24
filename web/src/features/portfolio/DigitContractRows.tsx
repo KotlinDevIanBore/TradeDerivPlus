@@ -24,7 +24,10 @@ export function DigitOpenCard({ contract }: { contract: DigitContract }) {
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2 text-meta text-muted">
-        <span className="tnum">{money(contract.stake)} stake</span>
+        <span className="flex items-center gap-2">
+          <span className="tnum">{money(contract.stake)} stake</span>
+          <BotChip contract={contract} />
+        </span>
         <span title="Settles on the next tick after entry">Settles next tick</span>
       </div>
       <p className="mt-1 text-nano text-faint">{relativeTime(contract.opened_at)}</p>
@@ -51,6 +54,7 @@ export function DigitSettledRow({ contract }: { contract: DigitContract }) {
           >
             {badge.label}
           </span>
+          <BotChip contract={contract} />
         </div>
         <p className="mt-0.5 text-meta text-muted">
           {contractTypeLabel(contract.contract_type)}
@@ -61,7 +65,9 @@ export function DigitSettledRow({ contract }: { contract: DigitContract }) {
           {money(contract.stake)} stake
         </p>
         <p className="text-nano text-faint">
-          {contract.settled_at ? relativeTime(contract.settled_at) : relativeTime(contract.opened_at)}
+          {contract.settled_at
+            ? relativeTime(contract.settled_at)
+            : relativeTime(contract.opened_at)}
         </p>
       </div>
       <div className="shrink-0 text-right">
@@ -74,6 +80,26 @@ export function DigitSettledRow({ contract }: { contract: DigitContract }) {
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Marks a contract an automated run placed, in both the open card and the settled
+ * row — so Positions and History both show it, since they share these two
+ * components.
+ *
+ * Neutral rather than coloured: whose hand placed a contract says nothing about
+ * how it went, and the row already uses colour for that.
+ */
+function BotChip({ contract }: { contract: DigitContract }) {
+  if (!contract.bot_run_id) return null
+  return (
+    <span
+      title="Placed by an automated run"
+      className="rounded-md bg-elevated px-1.5 py-0.5 text-nano font-semibold uppercase tracking-wide text-muted"
+    >
+      Bot
+    </span>
   )
 }
 

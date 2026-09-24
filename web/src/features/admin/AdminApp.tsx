@@ -4,6 +4,7 @@ import { Spinner } from '@/components/Spinner'
 import { bootstrapAdminSession } from './adminApi'
 import { AdminShell } from './AdminShell'
 import { AdminAuditLog } from './screens/AuditLog'
+import { AdminBotRuns } from './screens/BotRuns'
 import { AdminDashboard } from './screens/Dashboard'
 import { AdminKYCQueue } from './screens/KYCQueue'
 import { AdminLogin } from './screens/AdminLogin'
@@ -43,6 +44,7 @@ export default function AdminApp() {
         <Route path="users/:id" element={<AdminUserDetailScreen />} />
         <Route path="transactions" element={<AdminTransactions />} />
         <Route path="kyc" element={<AdminKYCQueue />} />
+        <Route path="bot-runs" element={<AdminBotRuns />} />
         <Route path="audit-log" element={<AdminAuditLog />} />
       </Route>
 

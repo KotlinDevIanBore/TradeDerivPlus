@@ -23,6 +23,8 @@ type Dashboard struct {
 	OpenPositions       int                         `json:"open_positions"`
 	LiveConnections     int                         `json:"live_connections"`
 	PendingKYC          int                         `json:"pending_kyc"`
+	LiveBotRuns         int                         `json:"live_bot_runs"`
+	BotEnabled          bool                        `json:"bot_enabled"`
 	DriftedAccounts     int                         `json:"drifted_accounts"`
 	Drift               []repository.AccountDrift   `json:"drift"`
 	DepositsByHour      []repository.HourlyDeposits `json:"deposits_by_hour"`
@@ -51,6 +53,15 @@ func (s *AdminService) Dashboard(ctx context.Context) (*Dashboard, error) {
 		return nil, err
 	}
 	if d.PendingKYC, err = s.store.KYC.PendingCount(ctx); err != nil {
+		return nil, err
+	}
+	if d.LiveBotRuns, err = s.store.BotRuns.CountLive(ctx); err != nil {
+		return nil, err
+	}
+	// Read through to the row rather than through SettingsService's cache. The
+	// console is where the flag is changed, and an operator who has just turned
+	// it off should not be shown "on" for another ten seconds.
+	if d.BotEnabled, err = s.botEnabled(ctx); err != nil {
 		return nil, err
 	}
 	// The tile that matters most: any account whose ledger and cached balance

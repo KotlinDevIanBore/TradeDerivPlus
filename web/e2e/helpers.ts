@@ -103,6 +103,48 @@ export async function closePanel(page: Page, name: string) {
   await page.getByRole('button', { name: `Close ${name}`, exact: true }).click()
 }
 
+/**
+ * Clicks Create account, and waits its turn if the limiter says to.
+ *
+ * The API's auth limiter is keyed by client IP, and every user a suite invents
+ * shares one — so a suite of twenty signups looks to it like one person signing
+ * up twenty times, which is exactly what it exists to refuse. CI raises the
+ * limits for that reason; a developer running the suite against an ordinarily
+ * configured API has no such thing, and the symptom was a `waitForURL` that
+ * timed out sixty seconds later with nothing to point at.
+ *
+ * So a refusal is treated as what it is — the suite queueing behind itself —
+ * and any other failure is rethrown untouched, because a signup that breaks for
+ * a real reason must still break the test.
+ */
+async function submitSignup(page: Page) {
+  const submit = page.getByRole('button', { name: 'Create account' })
+  const refused = page.getByRole('alert').filter({ hasText: 'Too many requests' })
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await submit.click()
+
+    // A refusal is instant, where a signup costs a round trip and a redirect —
+    // so the refusal is the one worth a short look, and everything else gets
+    // the full budget.
+    const wasRefused = await refused
+      .waitFor({ state: 'visible', timeout: 2_000 })
+      .then(() => true)
+      .catch(() => false)
+
+    if (!wasRefused) {
+      await page.waitForURL('**/', { timeout: 20_000 })
+      return
+    }
+
+    // One token every AUTH_RATE_EVERY, 3s by default, and a browser spends two
+    // per signup — the CORS preflight being the other.
+    await page.waitForTimeout(7_000)
+  }
+
+  throw new Error('Signup was rate limited four times over. Is the API set up for a test run?')
+}
+
 /** Registers through the UI, which is also how the signup path gets covered. */
 export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.goto('/register')
@@ -113,14 +155,51 @@ export async function register(page: Page, phone: string, name = 'E2E User') {
   await page.getByLabel('Confirm password').fill(PASSWORD)
   await page.getByRole('checkbox').check()
 
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await submitSignup(page)
 
   // Signup lands on the surface, which is the app. There is no Home to check
   // for any more, so the pill in the top bar is the landing: a demo account,
   // funded, without a second round trip.
-  await page.waitForURL('**/')
   await expect(accountPill(page)).toContainText('demo')
   await expect(accountPill(page)).toContainText('$10,000.00')
+}
+
+/**
+ * The balance the account pill is showing, as a number.
+ *
+ * Money crosses the wire as a string and is rendered with separators, so a spec
+ * that wants to compare balances has to come back through the formatting. Kept
+ * here because more than one spec needs it and getting the regex subtly wrong is
+ * the kind of thing that passes for the wrong reason.
+ */
+export async function pillAmount(page: Page): Promise<number> {
+  const text = await accountPill(page).innerText()
+  const match = text.match(/\$([\d,]+\.\d{2})/)
+  if (!match) throw new Error(`no amount in the account pill: ${JSON.stringify(text)}`)
+  return Number(match[1].replace(/,/g, ''))
+}
+
+/**
+ * Waits for the digit trading surface, which is what the main surface renders
+ * when digit_contracts_enabled is on.
+ *
+ * The wait is long because the flag arrives on /auth/me and the client polls it
+ * every ten seconds: a client that loaded before the flag was readable shows the
+ * CFD ticket until the next poll. The Even button is the tell, since the CFD
+ * ticket has no such control.
+ */
+export async function waitForDigitSurface(page: Page) {
+  await expect(page.getByRole('button', { name: 'Even' })).toBeVisible({ timeout: 45_000 })
+}
+
+/**
+ * Waits for the digit ticket to be able to place a contract, which needs a live
+ * price: the ticket is disabled until the first tick arrives and while the feed
+ * is reconnecting.
+ */
+export async function waitForDigitTicket(page: Page) {
+  await waitForDigitSurface(page)
+  await expect(page.getByRole('button', { name: 'Even' })).toBeEnabled({ timeout: 30_000 })
 }
 
 /**
@@ -180,8 +259,75 @@ export async function registerViaApi(phone: string) {
     body: { phone_number: phone, password: PASSWORD, full_name: 'E2E Fixture' },
   })
   return (await res.json()) as {
-    user: { id: string }
+    // The stored form, 2547…, which is what the admin console renders — not the
+    // 07… a test typed in.
+    user: { id: string; phone_number: string }
     account: { id: string; account_number: string }
     access_token: string
   }
+}
+
+/**
+ * Starts an automated run through the API, for specs about something other than
+ * the ticket that starts one.
+ *
+ * The limits are deliberately out of reach, so the run is still live when the
+ * test acts on it and the only thing that can end it is the test.
+ */
+export async function startRunViaApi(token: string, accountId: string) {
+  const res = await api('/bot/runs', {
+    token,
+    method: 'POST',
+    body: {
+      account_id: accountId,
+      symbol: 'R_75',
+      contract_type: 'even_odd',
+      selection: { parity: 'even' },
+      stake: '10',
+      interval_ms: 2000,
+      limits: { stop_loss: '500', max_contracts: 500 },
+    },
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    // Almost always one thing: an earlier run of the admin suite threw the kill
+    // switch and stopped before the case that turns it back on. Say so, rather
+    // than leaving a 403 to be decoded.
+    throw new Error(
+      `Could not start a run (${res.status}): ${body}. ` +
+        'If this says bot_disabled, automated trading is still off — turn it back on from the ' +
+        'console (Dashboard → Turn auto runs back on), or reseed the database.',
+    )
+  }
+  return (await res.json()) as { id: string; status: string }
+}
+
+/**
+ * Switches to AUTO and starts a run with the given limits.
+ *
+ * Kept here because the fields are the same at both widths and getting them
+ * wrong in one spec and right in another is how a suite stops meaning anything.
+ */
+export async function startAutoRun(
+  page: Page,
+  { stopLoss = '30', maxContracts = '3' }: { stopLoss?: string; maxContracts?: string } = {},
+) {
+  await page.getByRole('tab', { name: 'AUTO' }).click()
+  await expect(page.getByRole('button', { name: 'Start auto run' })).toBeEnabled({
+    timeout: 30_000,
+  })
+
+  await page.getByLabel('I have lost').fill(stopLoss)
+  await page.getByLabel('Contracts placed').fill(maxContracts)
+  await page.getByRole('button', { name: 'Start auto run' }).click()
+
+  // The card replacing the ticket is what "a run is live" looks like.
+  await expect(page.getByRole('button', { name: 'Stop run' })).toBeVisible({ timeout: 30_000 })
+}
+
+/** How many contracts the live run has placed, read off the card. */
+export async function placedCount(page: Page): Promise<number> {
+  const figure = page.locator('dt', { hasText: 'Placed' }).locator('..')
+  const text = await figure.innerText()
+  return Number(text.replace(/[^\d/]/g, '').split('/')[0] || 0)
 }

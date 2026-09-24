@@ -37,6 +37,11 @@ type AdminService struct {
 
 	// connections reports live socket count for the dashboard tile.
 	connections ConnectionCounter
+
+	// bots and settingsCache are the in-process halves of the bot kill switch:
+	// the database half works without them, these make it immediate.
+	bots          botStopper
+	settingsCache interface{ BustCache() }
 }
 
 func NewAdminService(store *repository.Store, hub Broadcaster, cfg *config.Config, log *slog.Logger) *AdminService {

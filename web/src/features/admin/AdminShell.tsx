@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
+  Bot,
   ClipboardList,
   LayoutDashboard,
   LogOut,
@@ -65,6 +66,7 @@ export function AdminShell() {
     { to: '/admin/users', label: 'Users', icon: UsersIcon },
     { to: '/admin/transactions', label: 'Transactions', icon: Receipt },
     { to: '/admin/kyc', label: 'KYC queue', icon: ShieldCheck, badge: kyc.data?.total },
+    { to: '/admin/bot-runs', label: 'Auto runs', icon: Bot },
     { to: '/admin/audit-log', label: 'Audit log', icon: ClipboardList },
   ]
 

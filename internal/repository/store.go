@@ -20,6 +20,7 @@ type Store struct {
 	Symbols        *SymbolRepo
 	Trades         *TradeRepo
 	DigitContracts *DigitContractRepo
+	BotRuns        *BotRunRepo
 	Signals        *SignalRepo
 	Mpesa          *MpesaRepo
 	Admins         *AdminRepo
@@ -43,6 +44,7 @@ func newStore(pool *pgxpool.Pool, db DBTX) *Store {
 		Symbols:        &SymbolRepo{db},
 		Trades:         &TradeRepo{db},
 		DigitContracts: &DigitContractRepo{db},
+		BotRuns:        &BotRunRepo{db},
 		Signals:        &SignalRepo{db},
 		Mpesa:          &MpesaRepo{db},
 		Admins:         &AdminRepo{db},

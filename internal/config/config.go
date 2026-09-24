@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -30,6 +31,26 @@ type Config struct {
 	// Explicit false/true from env seeds that value; an existing DB row is
 	// never overwritten on startup (see SettingsService).
 	DigitContractsEnabled bool
+
+	// Bounds on one digit contract and one account, enforced server-side in
+	// DigitService.Open. Placing a contract moves money, so these are the
+	// equivalent of the deposit and withdrawal limits below: the client's own
+	// checks are advice, and anything driving the API directly ignores them.
+	DigitMaxStake          float64
+	DigitMaxOpenPerAccount int
+
+	// Automated trading. These seed app_settings once and are then owned by the
+	// database, so a flag flipped in production survives a deploy. Defaults are
+	// deliberately off: the payout table is still a placeholder, so a bot must be
+	// switched on by a person rather than arrive enabled.
+	BotEnabled          bool
+	BotAllowlist        string
+	BotRealMoneyEnabled bool
+
+	// Bounds on every run, enforced in BotService. The bot calls the service
+	// directly and so never meets the HTTP rate limiter; these take its place.
+	BotMinIntervalMS int
+	BotMaxRuns       int
 
 	// Daraja / M-Pesa
 	MpesaBaseURL        string
@@ -95,6 +116,15 @@ func Load() (*Config, error) {
 
 		DigitContractsEnabled: getBool("DIGIT_CONTRACTS_ENABLED", true),
 
+		DigitMaxStake:          getFloat("DIGIT_MAX_STAKE", 100),
+		DigitMaxOpenPerAccount: int(getFloat("DIGIT_MAX_OPEN_PER_ACCOUNT", 5)),
+
+		BotEnabled:          getBool("BOT_ENABLED", false),
+		BotAllowlist:        getEnv("BOT_ALLOWLIST", ""),
+		BotRealMoneyEnabled: getBool("BOT_REAL_MONEY_ENABLED", false),
+		BotMinIntervalMS:    int(getFloat("BOT_MIN_INTERVAL_MS", 1000)),
+		BotMaxRuns:          int(getFloat("BOT_MAX_RUNS", 50)),
+
 		MpesaBaseURL:        getEnv("MPESA_BASE_URL", "https://sandbox.safaricom.co.ke"),
 		MpesaConsumerKey:    getEnv("MPESA_CONSUMER_KEY", ""),
 		MpesaConsumerSecret: getEnv("MPESA_CONSUMER_SECRET", ""),
@@ -111,7 +141,10 @@ func Load() (*Config, error) {
 		SignalInterval: getDuration("SIGNAL_INTERVAL", 2*time.Minute),
 		SignalSymbols:  []string{"R_10", "R_25", "R_50", "R_75", "R_100", "BOOM500", "CRASH500", "EURUSD"},
 
-		CORSOrigins: []string{getEnv("CORS_ORIGIN", "http://localhost:5173")},
+		// Comma-separated. The default covers both the app a developer runs and
+		// the one the browser suite starts on its own port — see the webServer
+		// note in web/playwright.config.ts for why the suite does not share 5173.
+		CORSOrigins: getList("CORS_ORIGIN", "http://localhost:5173,http://localhost:5174"),
 
 		AuthRateEvery: getDuration("AUTH_RATE_EVERY", 3*time.Second),
 		AuthRateBurst: int(getFloat("AUTH_RATE_BURST", 10)),
@@ -182,4 +215,20 @@ func getDuration(k string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// getList reads a comma-separated value into a slice, dropping blanks and
+// trimming each entry. Kept forgiving because these are typed by hand into
+// deployment configuration, where a trailing comma or a stray space is common and
+// is never what the author meant.
+func getList(k, def string) []string {
+	raw := getEnv(k, def)
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

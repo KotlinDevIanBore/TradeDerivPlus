@@ -20,6 +20,13 @@ export const queryKeys = {
       ? (['digitContracts', accountId] as const)
       : (['digitContracts', accountId, status] as const),
   digitQuote: (params: unknown) => ['digitQuote', params] as const,
+  botRuns: (accountId: string, status?: string) =>
+    status === undefined
+      ? (['botRuns', accountId] as const)
+      : (['botRuns', accountId, status] as const),
+  // Keyed by run rather than by account: a run is the thing being watched, and
+  // its id is stable while its account's other queries come and go.
+  botRun: (runId: string) => ['botRun', runId] as const,
   symbols: () => ['symbols'] as const,
   signals: (symbol?: string) => (symbol ? (['signals', symbol] as const) : (['signals'] as const)),
   rate: () => ['rate'] as const,

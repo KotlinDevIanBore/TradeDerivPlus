@@ -4,6 +4,13 @@ import { cn } from '@/lib/cn'
 import type { TradeSummary } from '@/types'
 import type { DigitSessionStats, SessionStats } from './sessionStats'
 
+/** What the Auto cell says, decided by the screen that knows about runs. */
+export interface AutoCell {
+  value: string
+  title?: string
+  className?: string
+}
+
 /**
  * Where the account stands, without leaving the chart. Deliberately four small
  * figures rather than Portfolio's tiles: this sits beside the thing it comments
@@ -13,6 +20,7 @@ export function SessionStrip({
   summary,
   session,
   digitSession,
+  auto,
   isLoading,
   stale,
 }: {
@@ -20,6 +28,8 @@ export function SessionStrip({
   session?: SessionStats
   /** When set, show digit-mode metrics instead of CFD Open P/L. */
   digitSession?: DigitSessionStats
+  /** The automated run's one-line state, when the feature is on for this user. */
+  auto?: AutoCell
   isLoading: boolean
   /** Dim the live figure when the feed is disconnected or a price is missing. */
   stale?: boolean
@@ -35,7 +45,11 @@ export function SessionStrip({
         className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-card border border-border bg-surface px-4 py-3 shadow-card sm:grid-cols-4"
       >
         <Cell label="Session P/L" title="Settled digit P/L since you opened the app">
-          <Money value={digitSession.realised.toString()} signed className="text-body font-semibold" />
+          <Money
+            value={digitSession.realised.toString()}
+            signed
+            className="text-body font-semibold"
+          />
         </Cell>
 
         <Cell label="Pending">
@@ -45,7 +59,7 @@ export function SessionStrip({
         <Cell
           label="Session"
           title="Settled since you opened the app, from the most recent page of settled contracts"
-          className="sm:col-span-2"
+          className={auto ? undefined : 'sm:col-span-2'}
         >
           <span className="text-body font-semibold tnum">
             {digitSession.contracts}
@@ -57,6 +71,15 @@ export function SessionStrip({
             ) : null}
           </span>
         </Cell>
+
+        {/* The fourth cell the digit grid already had room for. Present only when
+            automated trading is on for this user, so nothing changes for anyone
+            it is off for. */}
+        {auto ? (
+          <Cell label="Auto" title={auto.title}>
+            <span className={cn('text-body font-semibold', auto.className)}>{auto.value}</span>
+          </Cell>
+        ) : null}
       </section>
     )
   }
@@ -73,7 +96,12 @@ export function SessionStrip({
     >
       <Cell label="Open P/L">
         {summary ? (
-          <Money value={summary.open_pnl} signed stale={incomplete} className="text-body font-semibold" />
+          <Money
+            value={summary.open_pnl}
+            signed
+            stale={incomplete}
+            className="text-body font-semibold"
+          />
         ) : (
           <Dash />
         )}

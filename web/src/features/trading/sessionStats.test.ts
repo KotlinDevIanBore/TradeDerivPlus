@@ -88,6 +88,9 @@ function digitSettled(
     pnl,
     opened_at: '2026-09-21T11:00:00Z',
     void_after: '2026-09-21T11:00:05Z',
+    // Session stats count a contract the same whoever placed it, so these
+    // fixtures are human contracts and the field is only here to satisfy the type.
+    bot_run_id: null,
     symbol_code: 'R_75',
     symbol_name: 'Volatility 75 Index',
     pip_size: 4,

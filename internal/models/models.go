@@ -207,12 +207,28 @@ const (
 	ActionAdjustment = "manual_adjustment"
 	ActionKYCApprove = "kyc_approve"
 	ActionKYCReject  = "kyc_reject"
+	// ActionBotKill is the automated-trading kill switch: it stops every live run
+	// and turns the feature off, so it is the most consequential single button in
+	// the console and is audited like any other money action.
+	ActionBotKill = "bot_kill"
+	// The way back from the kill switch. Its own action, because an audit log
+	// that recorded the stop and not the restart would describe an outage that
+	// never ended.
+	ActionBotEnable = "bot_enable"
+	// Stopping one run is its own action, not a smaller bot_kill: the kill
+	// switch also turns the feature off for everyone, and an audit log that
+	// filed both under one name could not tell the two apart.
+	ActionBotRunStop = "bot_run_stop"
 )
 
 const (
 	TargetUser        = "user"
 	TargetAccount     = "account"
 	TargetTransaction = "transaction"
+	// TargetPlatform is for actions that are not about one user's row —
+	// the bot kill switch stops every live run at once.
+	TargetPlatform = "platform"
+	TargetBotRun   = "bot_run"
 )
 
 const (

@@ -7,6 +7,8 @@
 /bin/
 *.test
 tradederivplus
+# `go build ./cmd/api` with no -o lands here.
+/api
 
 # Node
 node_modules/

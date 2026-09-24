@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,17 +36,20 @@ import (
 // harness is everything a test needs: a live database, a store, and the
 // services wired the same way main.go wires them.
 type harness struct {
-	t       *testing.T
-	ctx     context.Context
-	store   *repository.Store
-	cfg     *config.Config
-	feed    *service.FeedService
-	trading *service.TradingService
-	digits  *service.DigitService
-	wallet  *service.WalletService
-	admin   *service.AdminService
-	mpesa   *service.MpesaService
-	log     *slog.Logger
+	t        *testing.T
+	ctx      context.Context
+	store    *repository.Store
+	cfg      *config.Config
+	feed     *service.FeedService
+	trading  *service.TradingService
+	digits   *service.DigitService
+	wallet   *service.WalletService
+	admin    *service.AdminService
+	mpesa    *service.MpesaService
+	bots     *service.BotService
+	settings *service.SettingsService
+	events   *captureBroadcaster
+	log      *slog.Logger
 }
 
 // container is started once for the whole package; each test gets clean data
@@ -136,12 +140,48 @@ func newHarness(t *testing.T) *harness {
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, noopBroadcaster{}, cfg, log)
 	trading := service.NewTradingService(store, feed, noopBroadcaster{}, log)
-	digits := service.NewDigitService(store, feed, noopBroadcaster{}, log)
+	// The production defaults, stated rather than inherited: a test that needs
+	// different limits constructs its own service with its own DigitLimits.
+	digits := service.NewDigitService(store, feed, noopBroadcaster{}, service.DigitLimits{
+		MaxStake:          decimal.NewFromInt(100),
+		MaxOpenPerAccount: 5,
+	}, log)
 	admin := service.NewAdminService(store, noopBroadcaster{}, cfg, log)
+
+	// Bot flags default on for tests, so a test that is about the loop does not
+	// have to turn the feature on first. Tests about the gates set them
+	// explicitly through store.Settings.
+	settings := service.NewSettingsService(store, service.SettingsDefaults{
+		DigitContractsEnabled: true,
+		BotEnabled:            true,
+		BotRealMoneyEnabled:   true,
+	}, log)
+	if err := settings.Bootstrap(ctx); err != nil {
+		t.Fatalf("settings bootstrap: %v", err)
+	}
+
+	events := &captureBroadcaster{}
+	bots := service.NewBotService(store, digits, feed, settings, events, service.BotLimits{
+		MinIntervalMS: 1, // real time is not what these tests are about
+		MaxRuns:       50,
+	}, log)
+	// The kill switch's in-process half, wired as main.go wires it, so a test of
+	// the switch exercises the immediate stop rather than only the row update.
+	admin.SetBotStopper(bots)
+	admin.SetSettingsCache(settings)
+	// Poll fast: settlement in a test is driven by an injected tick, not by a
+	// clock, so the only thing a real poll interval would add is waiting.
+	bots.SetPollInterval(5 * time.Millisecond)
+
+	// Same wiring main.go does for the kill switch: without these the rows still
+	// stop, but the cache and the goroutines would lag.
+	admin.SetBotStopper(bots)
+	admin.SetSettingsCache(settings)
 
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
-		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa, log: log,
+		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
+		bots: bots, settings: settings, events: events, log: log,
 	}
 }
 
@@ -322,6 +362,38 @@ func (h *harness) assertReconciled(accountID uuid.UUID) {
 type noopBroadcaster struct{}
 
 func (noopBroadcaster) Broadcast(string, string, any) {}
+
+// captureBroadcaster records what would have reached a client, so a test can
+// assert that an event was published without standing up a WebSocket.
+type captureBroadcaster struct {
+	mu   sync.Mutex
+	sent []captured
+}
+
+type captured struct {
+	Topic   string
+	Type    string
+	Payload any
+}
+
+func (b *captureBroadcaster) Broadcast(topic, msgType string, payload any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.sent = append(b.sent, captured{Topic: topic, Type: msgType, Payload: payload})
+}
+
+// ofType returns every captured event of one type.
+func (b *captureBroadcaster) ofType(msgType string) []captured {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := []captured{}
+	for _, e := range b.sent {
+		if e.Type == msgType {
+			out = append(out, e)
+		}
+	}
+	return out
+}
 
 // staticFeed satisfies derivclient.Feed without producing any ticks, so tests
 // drive prices explicitly through FeedService.InjectTick and a position's

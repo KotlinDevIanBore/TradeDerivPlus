@@ -73,6 +73,9 @@ func run() error {
 	if err := seedKYC(ctx, store, cfg); err != nil {
 		return err
 	}
+	if err := enableBotForDevelopment(ctx, store); err != nil {
+		return err
+	}
 
 	fmt.Println("\nSeed complete. Sign in at /admin/login with admin / " + service.SeededAdminPassword)
 	fmt.Println("You will be asked to change the password immediately.")
@@ -186,5 +189,23 @@ func seedKYC(ctx context.Context, store *repository.Store, cfg *config.Config) e
 	}
 
 	fmt.Println("created 3 pending KYC submissions with placeholder documents")
+	return nil
+}
+
+// enableBotForDevelopment turns automated trading on so a developer and CI can
+// exercise it without a SQL statement.
+//
+// It is unconditional here only because this whole command already refuses to
+// run outside development (see run()). Production seeds nothing: bot_enabled
+// defaults to false there and stays false until someone decides otherwise,
+// which is the point of the flag while the payout table is a placeholder.
+//
+// Real money stays off even in development. A local run should not be able to
+// practise on the one path that has not been reviewed.
+func enableBotForDevelopment(ctx context.Context, store *repository.Store) error {
+	if err := store.Settings.Set(ctx, repository.SettingBotEnabled, "true"); err != nil {
+		return err
+	}
+	fmt.Println("automated trading enabled (development only); real-money runs remain off")
 	return nil
 }

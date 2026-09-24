@@ -303,6 +303,54 @@ check("the auth limiter fires under a concurrent burst", 429 in codes,
 check("the limiter refuses rather than erroring", all(c in (401, 429) for c in codes),
       f"unexpected statuses: {sorted(set(c for c in codes if c not in (401, 429)))}")
 
+
+def burst_placement(token, account, n=30):
+    """Fire n contract placements at once and return the status codes.
+
+    The stake is deliberately invalid, because the point is the limiter and not
+    the contract: the bucket is consumed before the handler reads the body, so
+    every request that gets through is refused by validation and no money moves.
+
+    Authenticated buckets are keyed per user, and the group's own bucket is 20/s
+    burst 60 — well above this burst — so a 429 here can only have come from the
+    tighter bucket that guards placement.
+    """
+    import concurrent.futures
+
+    def attempt(_):
+        req = urllib.request.Request(
+            f"{BASE}/digit-contracts",
+            data=json.dumps({
+                "account_id": account, "symbol": "R_75",
+                "contract_type": "even_odd", "selection": {"parity": "even"},
+                "stake": "0",
+            }).encode(),
+            method="POST",
+        )
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+        except Exception:
+            return 0
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as pool:
+        return list(pool.map(attempt, range(n)))
+
+
+# Opening a position moves money, so it has its own bucket rather than sharing
+# the loose one that reads and price polling draw on. Asserted the same way as
+# the auth limiter: a burst that a single client could not legitimately produce.
+place_codes = burst_placement(stolen, demo_account)
+check("the placement limiter fires under a concurrent burst", 429 in place_codes,
+      f"statuses seen: {sorted(set(place_codes))}")
+check("placement refuses rather than erroring",
+      all(c in (422, 429) for c in place_codes),
+      f"unexpected statuses: {sorted(set(c for c in place_codes if c not in (422, 429)))}")
+
 # --- Signals ---------------------------------------------------------------
 print("\nSIGNALS")
 TOKEN = stolen

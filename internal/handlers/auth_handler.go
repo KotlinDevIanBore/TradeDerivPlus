@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/config"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
@@ -137,7 +138,21 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	digit, err := h.settings.DigitContractsEnabled(c.Request.Context())
+	ctx := c.Request.Context()
+	digit, err := h.settings.DigitContractsEnabled(ctx)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	// Effective for this user, not the raw global: the allowlist is part of the
+	// answer, and the client should not have to combine two flags to know whether
+	// to show the control.
+	botEnabled, err := h.settings.BotEnabledFor(ctx, middleware.UserID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	botRealMoney, err := h.settings.BotRealMoneyEnabled(ctx)
 	if err != nil {
 		fail(c, err)
 		return
@@ -145,11 +160,24 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, meResponse{
 		User:                  *user,
 		DigitContractsEnabled: digit,
+		BotEnabled:            botEnabled,
+		BotRealMoneyEnabled:   botRealMoney,
+		DigitMaxStake:         decimal.NewFromFloat(h.cfg.DigitMaxStake).StringFixed(2),
 	})
 }
 
-// meResponse is the user profile plus the runtime trading-surface flag.
+// meResponse is the user profile plus the runtime flags the web app branches on.
 type meResponse struct {
 	models.User
 	DigitContractsEnabled bool `json:"digit_contracts_enabled"`
+	// BotEnabled is already narrowed by the allowlist, so it answers "may this
+	// user start a run" rather than "is the feature switched on somewhere".
+	BotEnabled bool `json:"bot_enabled"`
+	// BotRealMoneyEnabled is what keeps v1 demo-only; the ticket reads it to
+	// explain itself on a real account rather than failing at submit.
+	BotRealMoneyEnabled bool `json:"bot_real_money_enabled"`
+	// DigitMaxStake is the server's per-contract ceiling, sent so a ticket can
+	// state it and refuse before a round trip rather than after one. A string,
+	// like every other amount, so the client parses it the same way.
+	DigitMaxStake string `json:"digit_max_stake"`
 }

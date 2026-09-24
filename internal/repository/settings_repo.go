@@ -10,6 +10,21 @@ import (
 
 const SettingDigitContractsEnabled = "digit_contracts_enabled"
 
+// Automated-trading flags. Unlike the digit flag, which only chooses which
+// trading surface the UI renders, bot_enabled gates the service itself: turning
+// it off refuses new runs and stops live ones.
+const (
+	SettingBotEnabled = "bot_enabled"
+	// SettingBotAllowlist is a comma-separated list of user IDs. Empty means
+	// everyone, so it is a narrowing tool for a staged rollout rather than a
+	// second switch that has to be remembered.
+	SettingBotAllowlist = "bot_allowlist"
+	// SettingBotRealMoneyEnabled keeps v1 demo-only by configuration rather than
+	// by code, so shipping to real money is a decision someone makes rather than
+	// a release someone cuts.
+	SettingBotRealMoneyEnabled = "bot_real_money_enabled"
+)
+
 // SettingsRepo is a small key/value store for runtime flags. The DB row is the
 // source of truth after bootstrap; env only seeds a missing key.
 type SettingsRepo struct{ db DBTX }
