@@ -287,12 +287,21 @@ export function DepositSheet({
         </div>
       ) : null}
 
+      {/* Nothing is watching this deposit once the sheet gives up: settlement
+          only ever arrives from M-Pesa's callback, and if that is lost rather
+          than slow, it never arrives. So the copy does not say the balance will
+          fix itself, and does not say we are checking — neither is true today.
+          It says what is known, and points at the one thing that can resolve
+          it, which is a person.
+
+          When the reconciliation pass exists this becomes a different screen:
+          "we're checking" will be true, and it should say so then. */}
       {step === 'timeout' ? (
         <div className="py-6 text-center">
           <h3 className="text-title font-bold tracking-tight">Still waiting on M-Pesa</h3>
           <p className="mx-auto mt-2 max-w-[36ch] text-body text-muted">
-            We haven't heard back yet. If you completed the payment, your balance will update
-            automatically.
+            We haven't had confirmation from M-Pesa. If your phone says the payment went through,
+            don't pay again — contact support with your phone number and we'll sort it out.
           </p>
 
           <div className="mt-6 space-y-2">
