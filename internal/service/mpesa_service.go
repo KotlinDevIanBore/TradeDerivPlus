@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +34,44 @@ type DepositResult struct {
 // Settlement sources, as written to transactions.metadata.settled_by.
 const (
 	SettledByCallback = "callback"
+	SettledByQuery    = "query"
 )
+
+// What the reconciliation pass found for one row; the label on
+// mpesa_reconcile_total. One of these per row examined, exactly.
+const (
+	ReconcileSucceeded      = "succeeded"       // the pass settled the deposit
+	ReconcileUnresolved     = "unresolved"      // Daraja: still processing; backoff advanced
+	ReconcileFailedIgnored  = "failed_ignored"  // Daraja: a terminal failure; NOT written (D2); backoff advanced
+	ReconcileError          = "error"           // Daraja said nothing, or settle failed; not an attempt
+	ReconcileGaveUp         = "gave_up"         // past the horizon; taken off the schedule for an operator
+	ReconcileAlreadySettled = "already_settled" // Daraja said paid, but a callback got there during the query
+)
+
+// reconcileBackoff is how long the pass waits after the n-th answered query
+// that did not resolve a deposit. PROVISIONAL, like the rest of the schedule
+// (plan §2.5): the shape — widen, then hold — stands; the numbers wait on
+// scripts/daraja_probe.py. The last entry repeats.
+var reconcileBackoff = []time.Duration{3 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour}
+
+// backoffAfter returns the wait once attempts answered queries have been made.
+func backoffAfter(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if attempts > len(reconcileBackoff) {
+		attempts = len(reconcileBackoff)
+	}
+	return reconcileBackoff[attempts-1]
+}
+
+// reconcileBatch bounds one pass. At one query per row, a full batch is a
+// minute or two of Daraja round trips, which is the pass interval.
+const reconcileBatch = 100
+
+// reconcileQueryTimeout bounds one query so a hung Daraja cannot hold a pass —
+// and the rows behind it — for the client's full 30s per row.
+const reconcileQueryTimeout = 15 * time.Second
 
 // stkQuerier is the one thing the reconciliation pass needs from Daraja. The
 // real client satisfies it directly; mock mode gets a stub that never resolves
@@ -65,7 +103,13 @@ type MpesaService struct {
 	cfg     *config.Config
 	log     *slog.Logger
 
-	onResult func(ctx context.Context, r DepositResult)
+	onResult    func(ctx context.Context, r DepositResult)
+	onReconcile func(outcome string)
+
+	// passMu keeps ticker passes from stacking: a pass slowed by Daraja is
+	// skipped over, not run alongside. Reconcile itself does not take it, so
+	// tests can drive concurrent passes on purpose.
+	passMu sync.Mutex
 
 	// afterInitiate runs synchronously at the end of InitiateSTK, before it
 	// returns to Deposit. Tests use it to land a settlement inside the window
@@ -102,6 +146,144 @@ func NewMpesaService(store *repository.Store, cfg *config.Config, log *slog.Logg
 // OnResult registers the settlement handler. The wallet service supplies it.
 func (s *MpesaService) OnResult(fn func(ctx context.Context, r DepositResult)) {
 	s.onResult = fn
+}
+
+// OnReconcile registers the metrics hook, called once per row the pass examines.
+func (s *MpesaService) OnReconcile(fn func(outcome string)) { s.onReconcile = fn }
+
+func (s *MpesaService) recordReconcile(outcome string) {
+	if s.onReconcile != nil {
+		s.onReconcile(outcome)
+	}
+}
+
+// Start runs the reconciliation pass: once now, for whatever a restart
+// stranded, then on every tick until ctx is cancelled. In the shape of
+// DigitService.Start, with one difference — the boot pass is in the goroutine
+// too, because a pass talks to Daraja and a boot that waits on a hundred
+// network round trips is a boot that fails its health check.
+//
+// Must be called after the wallet service has registered OnResult. A pass
+// before that refuses to settle (see settle), which is safe but pointless.
+func (s *MpesaService) Start(ctx context.Context) {
+	go func() {
+		s.tick(ctx)
+		t := time.NewTicker(s.cfg.MpesaReconcileEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.tick(ctx)
+			}
+		}
+	}()
+}
+
+func (s *MpesaService) tick(ctx context.Context) {
+	if !s.passMu.TryLock() {
+		s.log.Warn("m-pesa reconcile: previous pass still running, skipping this tick")
+		return
+	}
+	defer s.passMu.Unlock()
+	s.Reconcile(ctx)
+}
+
+// Reconcile runs one pass over the pending deposits that are due a look.
+//
+// For each: past the give-up horizon, it is taken off the schedule and left
+// for an operator. Otherwise Daraja is asked, and only a plain "the customer
+// paid" settles anything — through settle, the same function a callback uses,
+// so the guards and the credit are the ones every path shares. A terminal
+// failure from a query is NOT written (plan D2): wrong-Failed costs a paying
+// customer, so the row waits for the callback or the horizon. "Still
+// processing" and "failed" both advance the backoff. An error is not an
+// attempt: Daraja said nothing, so the row is left exactly as it was, due, and
+// the next pass asks again.
+//
+// Exported so tests drive it directly; production calls it from Start.
+func (s *MpesaService) Reconcile(ctx context.Context) {
+	now := time.Now()
+	rows, err := s.store.Mpesa.ListPending(ctx, now, reconcileBatch)
+	if err != nil {
+		s.log.Warn("m-pesa reconcile: list pending", "err", err)
+		return
+	}
+	for i := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		s.reconcileOne(ctx, &rows[i], now)
+	}
+}
+
+func (s *MpesaService) reconcileOne(ctx context.Context, row *models.MpesaRequest, now time.Time) {
+	age := now.Sub(row.CreatedAt)
+	if age > s.cfg.MpesaReconcileGiveUp {
+		if err := s.store.Mpesa.MarkGivenUp(ctx, row.CheckoutRequestID); err != nil {
+			s.log.Warn("m-pesa reconcile: mark given up", "checkout_id", row.CheckoutRequestID, "err", err)
+			s.recordReconcile(ReconcileError)
+			return
+		}
+		s.log.Warn("m-pesa reconcile: giving up on a pending deposit — needs an operator",
+			"checkout_id", row.CheckoutRequestID, "transaction", row.TransactionID,
+			"age", age.Round(time.Minute), "attempts", row.ReconcileAttempts)
+		s.recordReconcile(ReconcileGaveUp)
+		return
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, reconcileQueryTimeout)
+	out, err := s.querier.STKQuery(qctx, row.CheckoutRequestID)
+	cancel()
+	if err != nil {
+		// Not an attempt. The row keeps its schedule, so it is still due and the
+		// next pass asks again; a Daraja outage must not walk rows toward the
+		// horizon.
+		s.log.Warn("m-pesa reconcile: query failed", "checkout_id", row.CheckoutRequestID, "err", err)
+		s.recordReconcile(ReconcileError)
+		return
+	}
+
+	switch out.Status {
+	case mpesaclient.QuerySucceeded:
+		won, err := s.settle(ctx, row.CheckoutRequestID, 0, out.ResultDesc, "", SettledByQuery)
+		if err != nil {
+			s.log.Error("m-pesa reconcile: settle", "checkout_id", row.CheckoutRequestID, "err", err)
+			s.recordReconcile(ReconcileError)
+			return
+		}
+		if !won {
+			// A callback landed between our read and our write. It credited; we
+			// did not. That is the guard doing its job, not a failure.
+			s.recordReconcile(ReconcileAlreadySettled)
+			return
+		}
+		s.log.Info("m-pesa reconcile: settled a deposit by query",
+			"checkout_id", row.CheckoutRequestID, "transaction", row.TransactionID, "attempts", row.ReconcileAttempts)
+		s.recordReconcile(ReconcileSucceeded)
+
+	case mpesaclient.QueryFailed:
+		// Daraja names a terminal failure and the pass does not write it. The
+		// callback may still say otherwise; if it never comes, the horizon does.
+		s.log.Info("m-pesa reconcile: daraja reports a failure; leaving the row for the callback",
+			"checkout_id", row.CheckoutRequestID, "result_code", out.ResultCode, "result_desc", out.ResultDesc)
+		s.advance(ctx, row, now, ReconcileFailedIgnored)
+
+	default:
+		s.advance(ctx, row, now, ReconcileUnresolved)
+	}
+}
+
+// advance records an answered-but-unresolved query and schedules the next.
+func (s *MpesaService) advance(ctx context.Context, row *models.MpesaRequest, now time.Time, outcome string) {
+	attempts := row.ReconcileAttempts + 1
+	if err := s.store.Mpesa.MarkQueried(ctx, row.CheckoutRequestID, attempts, now.Add(backoffAfter(attempts))); err != nil {
+		s.log.Warn("m-pesa reconcile: mark queried", "checkout_id", row.CheckoutRequestID, "err", err)
+		s.recordReconcile(ReconcileError)
+		return
+	}
+	s.recordReconcile(outcome)
 }
 
 // InitiateSTK sends the push and records the request. amountKES is what the

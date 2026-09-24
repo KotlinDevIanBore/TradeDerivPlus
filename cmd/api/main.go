@@ -100,6 +100,7 @@ func run() error {
 	admin.SetConnectionCounter(hub)
 	admin.OnAction(observability.RecordAdminAction)
 	wallet.OnDepositSettled(observability.RecordDeposit)
+	mpesa.OnReconcile(observability.RecordReconcile)
 
 	settings := service.NewSettingsService(store, service.SettingsDefaults{
 		DigitContractsEnabled: cfg.DigitContractsEnabled,
@@ -127,6 +128,11 @@ func run() error {
 	go feed.Run(ctx)
 	trading.Start(ctx)
 	digits.Start(ctx)
+	// The reconciliation pass. After NewWalletService above, which registered
+	// the settlement handler: a pass with nowhere to send a result refuses to
+	// settle rather than consume the guard, so the order is what makes the boot
+	// pass able to credit anything.
+	mpesa.Start(ctx)
 	// After digits.Start, whose boot sweep has already settled or voided what it
 	// could: runs left live by the previous process are ended here rather than
 	// resumed, and a contract still open folds into its (now stopped) run through
@@ -138,7 +144,7 @@ func run() error {
 
 	// Refresh the gauges, including the ledger drift number that says whether
 	// any balance has moved without a matching ledger row.
-	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount), log, time.Minute)
+	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount, cfg.MpesaReconcileMinAge), log, time.Minute)
 
 	// --- HTTP ---------------------------------------------------------------
 	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa}

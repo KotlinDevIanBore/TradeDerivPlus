@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/config"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/mpesaclient"
@@ -63,5 +64,20 @@ func TestSetQuerierForTestReplacesTheQuerier(t *testing.T) {
 	out, _ := s.querier.STKQuery(context.Background(), "x")
 	if out.Status != mpesaclient.QuerySucceeded {
 		t.Fatalf("status %s after SetQuerierForTest, want the scripted succeeded", out.Status)
+	}
+}
+
+// The ladder: widen, then hold. The numbers are provisional; the shape — the
+// first wait is the min-age's neighbour, the last repeats — is what the pass
+// relies on.
+func TestReconcileBackoffLadder(t *testing.T) {
+	want := []time.Duration{3 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour, time.Hour, time.Hour}
+	for i, w := range want {
+		if got := backoffAfter(i + 1); got != w {
+			t.Fatalf("after %d attempts backoff is %s, want %s", i+1, got, w)
+		}
+	}
+	if got := backoffAfter(0); got != 3*time.Minute {
+		t.Fatalf("after 0 attempts (never valid, but never a panic) backoff is %s, want the first rung", got)
 	}
 }

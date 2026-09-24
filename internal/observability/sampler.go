@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"time"
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 )
@@ -11,10 +12,19 @@ import (
 type StoreSampler struct {
 	store       *repository.Store
 	connections func() int
+	// staleAfter is the reconciliation min-age: a deposit pending longer than
+	// this is one the callback should have settled by now.
+	staleAfter time.Duration
 }
 
-func NewStoreSampler(store *repository.Store, connections func() int) *StoreSampler {
-	return &StoreSampler{store: store, connections: connections}
+func NewStoreSampler(store *repository.Store, connections func() int, staleAfter time.Duration) *StoreSampler {
+	return &StoreSampler{store: store, connections: connections, staleAfter: staleAfter}
+}
+
+// StaleDeposits counts from the table, not from the pass, so a row the pass has
+// given up on — or never scheduled — is still in the number.
+func (s *StoreSampler) StaleDeposits(ctx context.Context) (int, error) {
+	return s.store.Mpesa.CountPendingOlderThan(ctx, s.staleAfter)
 }
 
 func (s *StoreSampler) OpenTrades(ctx context.Context) (int, error) {

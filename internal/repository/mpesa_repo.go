@@ -103,6 +103,19 @@ func (r *MpesaRepo) MarkQueried(ctx context.Context, checkoutID string, attempts
 	return mapErr(err)
 }
 
+// MarkGivenUp takes a pending row off the pass's schedule for good: the
+// callback never came, the queries never resolved it, and after the give-up
+// horizon it is a person's to settle. next_query_at goes NULL, so ListPending
+// never lists it again and it is not re-counted every pass; created_at is
+// untouched, so CountPendingOlderThan still shows it to the operator. Guarded on
+// 'pending' like every other reconciler write.
+func (r *MpesaRepo) MarkGivenUp(ctx context.Context, checkoutID string) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE mpesa_requests SET next_query_at = NULL
+		WHERE checkout_request_id = $1 AND status = 'pending'`, checkoutID)
+	return mapErr(err)
+}
+
 // CountPendingOlderThan feeds the stale-deposit gauge. It keys on created_at,
 // not next_query_at, so a row the pass cannot see still counts.
 func (r *MpesaRepo) CountPendingOlderThan(ctx context.Context, age time.Duration) (int, error) {

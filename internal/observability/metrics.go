@@ -99,7 +99,37 @@ var (
 		Name: "bot_runs_stopped_total",
 		Help: "Automated runs that ended, by reason. A rising 'error' is a defect.",
 	}, []string{"reason"})
+
+	// STK reconciliation: what the pass found, one increment per row it looked
+	// at. Read together with the gauge below. Stale rising while 'error' rises
+	// is a Daraja outage; rising while 'unresolved' rises is Daraja saying "still
+	// processing" for a long time; rising with neither is the pass not running.
+	// 'succeeded' rows are also in deposits_total, because they settle through
+	// the same path a callback does.
+	mpesaReconcileTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mpesa_reconcile_total",
+		Help: "Pending deposits examined by the STK reconciliation pass, by what happened.",
+	}, []string{"outcome"})
+
+	// Deposits pending longer than the reconciliation min-age. Counts every
+	// such row, including ones the pass has given up on or cannot see, so this
+	// is the number an operator owes attention to.
+	mpesaDepositsPendingStale = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mpesa_deposits_pending_stale",
+		Help: "M-Pesa deposits pending longer than the reconciliation min-age.",
+	})
 )
+
+// The reconcile outcomes, so a dashboard sees every series at zero from boot
+// rather than only the ones that have happened yet.
+func init() {
+	for _, o := range []string{"succeeded", "unresolved", "failed_ignored", "error", "gave_up", "already_settled"} {
+		mpesaReconcileTotal.WithLabelValues(o)
+	}
+}
+
+// RecordReconcile is called once per row the reconciliation pass examines.
+func RecordReconcile(outcome string) { mpesaReconcileTotal.WithLabelValues(outcome).Inc() }
 
 // RecordBotContract is called once per contract, when it settles.
 func RecordBotContract(outcome string) { botContractsTotal.WithLabelValues(outcome).Inc() }
@@ -145,6 +175,7 @@ type Sampler interface {
 	OpenTrades(ctx context.Context) (int, error)
 	DriftedAccounts(ctx context.Context) (int, error)
 	LiveBotRuns(ctx context.Context) (int, error)
+	StaleDeposits(ctx context.Context) (int, error)
 	Connections() int
 }
 
@@ -175,6 +206,12 @@ func Collect(ctx context.Context, s Sampler, log *slog.Logger, every time.Durati
 			botRunsLive.Set(float64(n))
 		} else {
 			log.Warn("metrics: live bot runs", "err", err)
+		}
+
+		if n, err := s.StaleDeposits(sampleCtx); err == nil {
+			mpesaDepositsPendingStale.Set(float64(n))
+		} else {
+			log.Warn("metrics: stale deposits", "err", err)
 		}
 
 		wsConnections.Set(float64(s.Connections()))
