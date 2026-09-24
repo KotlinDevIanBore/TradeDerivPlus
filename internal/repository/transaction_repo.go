@@ -45,6 +45,23 @@ func (r *TransactionRepo) UpdateStatusIfPending(ctx context.Context, id uuid.UUI
 	return tag.RowsAffected() > 0, nil
 }
 
+// MergeMetadata adds keys to a row's metadata and touches nothing else — in
+// particular not status.
+//
+// It exists because the one place that wrote metadata after a deposit was
+// initiated did so through UpdateStatus, re-asserting 'pending' as a side
+// effect. A settlement landing in the gap between the push being accepted and
+// that write was reverted to pending with the wallet already credited, and
+// nothing could repair it afterwards: the mpesa_requests row was already
+// terminal, so every later settle attempt lost its guard. Metadata writes must
+// not be able to move status, and this is the method that cannot.
+func (r *TransactionRepo) MergeMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE transactions SET metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb WHERE id = $1`,
+		id, metadata)
+	return mapErr(err)
+}
+
 func (r *TransactionRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, metadata map[string]any) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE transactions SET status = $2, metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb WHERE id = $1`,
@@ -120,7 +137,10 @@ type AdminTransaction struct {
 }
 
 // SearchAll backs the admin transaction list: cross-account, filterable, and
-// searchable by reference, receipt, phone, account number or id.
+// searchable by reference, receipt, phone, account number or id — and by
+// checkout_request_id, which is the reference a customer can read off the
+// pending deposit screen, and the only one a deposit settled without a receipt
+// will ever have.
 func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status string, limit, offset int) ([]AdminTransaction, int, error) {
 	const from = `
 		FROM transactions t
@@ -134,6 +154,7 @@ func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status s
 		  AND ($1 = ''
 		       OR t.reference ILIKE '%' || $1 || '%'
 		       OR t.metadata->>'receipt' ILIKE '%' || $1 || '%'
+		       OR t.metadata->>'checkout_request_id' ILIKE '%' || $1 || '%'
 		       OR u.phone_number ILIKE '%' || $1 || '%'
 		       OR a.account_number ILIKE '%' || $1 || '%'
 		       OR t.id::text = $1)`

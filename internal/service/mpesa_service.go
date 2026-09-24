@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -23,7 +24,16 @@ type DepositResult struct {
 	Success       bool
 	Receipt       string
 	Reason        string
+	// Source is who established the outcome: "callback", or later "query" and
+	// "admin". The ledger records it, because a deposit settled without a
+	// receipt should say how rather than look like a callback that lost one.
+	Source string
 }
+
+// Settlement sources, as written to transactions.metadata.settled_by.
+const (
+	SettledByCallback = "callback"
+)
 
 // MpesaService owns the STK push lifecycle and the mpesa_requests table.
 // It knows nothing about wallets; it reports outcomes through OnResult.
@@ -34,7 +44,18 @@ type MpesaService struct {
 	log    *slog.Logger
 
 	onResult func(ctx context.Context, r DepositResult)
+
+	// afterInitiate runs synchronously at the end of InitiateSTK, before it
+	// returns to Deposit. Tests use it to land a settlement inside the window
+	// between the push being accepted and Deposit's follow-up write — the window
+	// a real callback can hit and the mock, with its four-second delay, never
+	// does. Nil in production.
+	afterInitiate func(checkoutID string)
 }
+
+// SetAfterInitiateForTest is for tests, which need to act inside InitiateSTK's
+// return path rather than after it.
+func (s *MpesaService) SetAfterInitiateForTest(fn func(checkoutID string)) { s.afterInitiate = fn }
 
 func NewMpesaService(store *repository.Store, cfg *config.Config, log *slog.Logger) *MpesaService {
 	var client *mpesaclient.Client
@@ -92,52 +113,94 @@ func (s *MpesaService) InitiateSTK(ctx context.Context, transactionID uuid.UUID,
 	if s.cfg.UseMockMpesa {
 		go s.simulateCallback(checkoutID)
 	}
+	if s.afterInitiate != nil {
+		s.afterInitiate(checkoutID)
+	}
 	return checkoutID, nil
 }
 
 // HandleCallback processes a Daraja callback. It is idempotent: a repeated
 // callback for an already-settled request is acknowledged and ignored, which
 // matters because Daraja retries.
+//
+// It is an adapter over settle, and deliberately nothing more: the callback is
+// one of the ways a deposit's outcome arrives, not the definition of settling.
 func (s *MpesaService) HandleCallback(ctx context.Context, cb mpesaclient.Callback) error {
 	stk := cb.Body.STKCallback
 	if stk.CheckoutRequestID == "" {
 		return invalid("CheckoutRequestID", "missing CheckoutRequestID")
 	}
+	_, err := s.settle(ctx, stk.CheckoutRequestID, stk.ResultCode, stk.ResultDesc,
+		cb.ReceiptNumber(), SettledByCallback)
+	return err
+}
 
-	req, err := s.store.Mpesa.GetByCheckoutID(ctx, stk.CheckoutRequestID)
-	if err != nil {
-		return err
+// settle is the only way a deposit's outcome is written.
+//
+// Every source of an outcome — the callback today, a status query and the
+// console later — comes through here, so the guarded write at UpdateResult and
+// the credit at settleDeposit are the ones every path shares. "No second way to
+// settle a deposit" is enforced by there being one function, not by convention.
+//
+// It reports whether this call was the one that wrote the outcome. The write
+// decides, not a read: checking the row's status first and then writing would
+// be two statements with a gap between them, and Daraja retries — two deliveries
+// for one push can both read 'pending' and both go on to credit. The guard is
+// inside the UPDATE, so exactly one caller is told it won, and only that one
+// credits anything.
+func (s *MpesaService) settle(ctx context.Context, checkoutID string, resultCode int, resultDesc, receipt, source string) (bool, error) {
+	// Refuse, rather than win the guard with nowhere to send the result. With no
+	// handler the mpesa_requests row would go terminal and the ledger would stay
+	// pending for ever — every later attempt loses the guard this one consumed.
+	// The window is real at boot, between this service being built and the
+	// wallet service registering itself.
+	if s.onResult == nil {
+		return false, errors.New("m-pesa settle: no result handler registered")
 	}
 
-	success := stk.ResultCode == 0
+	req, err := s.store.Mpesa.GetByCheckoutID(ctx, checkoutID)
+	if err != nil {
+		return false, err
+	}
+
+	success := resultCode == 0
 	status := models.StatusFailed
 	if success {
 		status = models.StatusCompleted
 	}
 
-	// The write decides, not the read. Checking req.Status here and then writing
-	// would be two statements with a gap between them, and Daraja retries: two
-	// deliveries for one push can both read 'pending' and both go on to settle
-	// the same deposit. The guard is inside the UPDATE, so exactly one caller is
-	// told it won and only that one credits anything.
-	won, err := s.store.Mpesa.UpdateResult(ctx, stk.CheckoutRequestID, status, stk.ResultCode, stk.ResultDesc)
+	won, err := s.store.Mpesa.UpdateResult(ctx, checkoutID, status, resultCode, resultDesc)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !won {
-		s.log.Info("duplicate m-pesa callback ignored", "checkout_id", stk.CheckoutRequestID)
-		return nil
+		// Usually a retry of a callback already handled. The one case that is
+		// not routine: Safaricom now says the customer paid, and the row was
+		// already closed as failed — by an operator, or by an earlier delivery
+		// that said otherwise. Money moved and the ledger says it did not, and
+		// only a person can reconcile that, so it is an error and not a log line
+		// that reads like housekeeping.
+		if success {
+			if current, err := s.store.Mpesa.GetByCheckoutID(ctx, checkoutID); err == nil &&
+				current.Status == models.StatusFailed {
+				s.log.Error("m-pesa reports a paid deposit that was already recorded as failed",
+					"checkout_id", checkoutID, "receipt", receipt, "source", source,
+					"transaction", current.TransactionID)
+				return false, nil
+			}
+		}
+		s.log.Info("duplicate m-pesa settlement ignored", "checkout_id", checkoutID, "source", source)
+		return false, nil
 	}
 
-	if s.onResult != nil {
-		s.onResult(ctx, DepositResult{
-			TransactionID: req.TransactionID,
-			Success:       success,
-			Receipt:       cb.ReceiptNumber(),
-			Reason:        humanResult(stk.ResultCode, stk.ResultDesc),
-		})
-	}
-	return nil
+	s.onResult(ctx, DepositResult{
+		TransactionID: req.TransactionID,
+		Success:       success,
+		Receipt:       receipt,
+		Reason:        humanResult(resultCode, resultDesc),
+		Source:        source,
+	})
+	return true, nil
 }
 
 // simulateCallback drives the mock deposit lifecycle so the four-step deposit

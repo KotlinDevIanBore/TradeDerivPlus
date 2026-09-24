@@ -202,7 +202,12 @@ func (s *WalletService) Deposit(ctx context.Context, in DepositInput) (*DepositR
 		return nil, err
 	}
 
-	_ = s.store.Transactions.UpdateStatus(ctx, tx.ID, models.StatusPending,
+	// Metadata only. This used to go through UpdateStatus and re-assert
+	// 'pending', which reverted any settlement that had landed in the gap since
+	// InitiateSTK returned — wallet credited, ledger pending, and unrepairable
+	// because the mpesa_requests row was already terminal. The gap is real on a
+	// live feed and invisible under the mock, whose callback waits four seconds.
+	_ = s.store.Transactions.MergeMetadata(ctx, tx.ID,
 		map[string]any{"checkout_request_id": checkoutID})
 
 	s.notify(account.ID, "transaction", map[string]any{
@@ -235,7 +240,7 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 
 	if !r.Success {
 		won, err := s.store.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusFailed,
-			map[string]any{"reason": r.Reason})
+			map[string]any{"reason": r.Reason, "settled_by": r.Source})
 		if err != nil {
 			s.log.Error("settle deposit: mark failed", "err", err)
 			return
@@ -263,7 +268,10 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 	var wallet *models.Wallet
 	credited := false
 	err = s.store.WithTx(ctx, func(st *repository.Store) error {
-		meta := map[string]any{"reason": r.Reason}
+		// settled_by records where the outcome came from. A callback carries a
+		// receipt; a query or an operator does not, and a row with no receipt
+		// should say why rather than look like a callback that forgot one.
+		meta := map[string]any{"reason": r.Reason, "settled_by": r.Source}
 		if r.Receipt != "" {
 			meta["receipt"] = r.Receipt
 		}
