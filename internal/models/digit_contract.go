@@ -70,6 +70,11 @@ type DigitContract struct {
 	OpenedAt        time.Time        `json:"opened_at"`
 	VoidAfter       time.Time        `json:"void_after"`
 
+	// BotRunID is the run that placed this contract, or nil when a human did.
+	// Without it a bot's contract is indistinguishable from a person's, which
+	// makes both support and accounting guesswork.
+	BotRunID *uuid.UUID `json:"bot_run_id"`
+
 	SymbolCode string `json:"symbol_code"`
 	SymbolName string `json:"symbol_name"`
 	PipSize    int    `json:"pip_size"`
@@ -88,4 +93,11 @@ type DigitQuote struct {
 	Stake           decimal.Decimal `json:"stake"`
 	PayoutRatio     decimal.Decimal `json:"payout_ratio"`
 	PotentialPayout decimal.Decimal `json:"potential_payout"`
+
+	// The economics of this selection, served rather than computed client-side so
+	// there is one answer to "what does this contract cost on average" and the UI
+	// cannot drift from the payout table. Expected return is negative for every
+	// selection on the current table.
+	WinProbability decimal.Decimal `json:"win_probability"`
+	ExpectedReturn decimal.Decimal `json:"expected_return"`
 }

@@ -228,6 +228,96 @@ func TestDigitRestartRecovery(t *testing.T) {
 	h.assertReconciled(accountID)
 }
 
+func TestDigitMaxStakeRejected(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.newUser(decimal.NewFromInt(100000))
+	h.feed.InjectTickAt(digitSymbol, decimal.RequireFromString("100.10"), 100)
+
+	// Well within the balance, so only the ceiling can refuse it. This is the
+	// case the client cannot be trusted with: the ticket checks the balance, not
+	// the limit.
+	_, err := h.digits.Open(h.ctx, service.OpenDigitInput{
+		UserID: userID, AccountID: accountID, SymbolCode: digitSymbol,
+		ContractType: models.DigitEvenOdd,
+		Selection:    models.DigitSelection{Parity: models.DigitParityEven},
+		Stake:        decimal.NewFromInt(101),
+	})
+	var ve *service.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("want validation error, got %v", err)
+	}
+	if ve.Field != "stake" {
+		t.Fatalf("field %q, want stake", ve.Field)
+	}
+
+	// The boundary itself is allowed, so the message and the rule agree.
+	if _, err := h.digits.Open(h.ctx, service.OpenDigitInput{
+		UserID: userID, AccountID: accountID, SymbolCode: digitSymbol,
+		ContractType: models.DigitEvenOdd,
+		Selection:    models.DigitSelection{Parity: models.DigitParityEven},
+		Stake:        decimal.NewFromInt(100),
+	}); err != nil {
+		t.Fatalf("stake at the ceiling should open: %v", err)
+	}
+	h.assertReconciled(accountID)
+}
+
+func TestDigitOpenCapIsRaceFree(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.newUser(decimal.NewFromInt(100000))
+	// No settlement tick follows, so every contract opened here stays open and
+	// counts against the cap.
+	h.feed.InjectTickAt(digitSymbol, decimal.RequireFromString("100.10"), 100)
+
+	const cap_ = 5 // the harness's MaxOpenPerAccount
+	var opened, refused atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < cap_*2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := h.digits.Open(h.ctx, service.OpenDigitInput{
+				UserID: userID, AccountID: accountID, SymbolCode: digitSymbol,
+				ContractType: models.DigitEvenOdd,
+				Selection:    models.DigitSelection{Parity: models.DigitParityEven},
+				Stake:        decimal.NewFromInt(10),
+			})
+			switch {
+			case err == nil:
+				opened.Add(1)
+			case errors.Is(err, service.ErrTooManyOpen):
+				refused.Add(1)
+			default:
+				t.Errorf("unexpected error: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if opened.Load() != cap_ {
+		t.Fatalf("opened %d, want exactly %d", opened.Load(), cap_)
+	}
+	if refused.Load() != cap_ {
+		t.Fatalf("refused %d, want %d", refused.Load(), cap_)
+	}
+
+	// The cap is about how many contracts exist, not how many the caller thinks
+	// it made, so it is checked against the table.
+	var n int
+	if err := h.store.Pool().QueryRow(h.ctx,
+		`SELECT count(*) FROM digit_contracts WHERE account_id = $1 AND status = 'open'`,
+		accountID).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != cap_ {
+		t.Fatalf("%d open contracts in the table, want %d", n, cap_)
+	}
+	h.assertReconciled(accountID)
+}
+
 func TestDigitRejectsNonVolatility(t *testing.T) {
 	h := newHarness(t)
 	userID, accountID := h.newUser(decimal.NewFromInt(1000))

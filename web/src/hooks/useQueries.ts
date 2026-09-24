@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountsApi } from '@/api/accounts'
 import { authApi } from '@/api/auth'
+import { botApi, type StartRunInput } from '@/api/bot'
 import { digitApi, type OpenDigitInput } from '@/api/digit'
 import { marketApi } from '@/api/market'
 import { tradesApi, type OpenTradeInput } from '@/api/trades'
 import { walletApi } from '@/api/wallet'
 import { queryKeys } from '@/lib/queryKeys'
 import { useSessionStore } from '@/store/session'
-import type { AccountType, DigitContractStatus, DigitContractType, DigitSelection, TradeStatus, TxType } from '@/types'
+import type { AccountType, BotRun, DigitContractStatus, DigitContractType, DigitSelection, TradeStatus, TxType } from '@/types'
 
 /**
  * Server state lives here. Components receive data and callbacks as props from
@@ -183,5 +184,64 @@ export function useRate() {
     queryFn: () => walletApi.rate(),
     enabled,
     staleTime: 600_000,
+  })
+}
+
+// --- Automated runs ---------------------------------------------------------
+
+/**
+ * The account's live run, or null when there is none.
+ *
+ * At most one run per account can be live — the server enforces it with a
+ * partial unique index — so this is a single value rather than a list. It polls
+ * while a run is live as a safety net under the `bot_run` socket event, which is
+ * what actually keeps the card current; the poll only has to catch a dropped
+ * socket, so two seconds is frequent enough.
+ */
+export function useLiveBotRun(accountId: string | null) {
+  const query = useQuery({
+    queryKey: queryKeys.botRuns(accountId ?? '', 'live'),
+    queryFn: () => botApi.list(accountId!, 'live', { limit: 1 }),
+    enabled: Boolean(accountId),
+    refetchInterval: (q) => (q.state.data?.items?.length ? 2_000 : false),
+  })
+  return { ...query, run: query.data?.items?.[0] ?? null }
+}
+
+/** A run's history, for the list of past runs. */
+export function useBotRuns(accountId: string | null, status?: 'live' | 'stopped', limit = 25) {
+  return useQuery({
+    queryKey: queryKeys.botRuns(accountId ?? '', status ?? 'all'),
+    queryFn: () => botApi.list(accountId!, status, { limit }),
+    enabled: Boolean(accountId),
+  })
+}
+
+/**
+ * Invalidating after a run changes. The wallet and the contract list move with
+ * it, because starting a run places a contract almost immediately and stopping
+ * one may have just settled the last.
+ */
+function invalidateForRun(queryClient: ReturnType<typeof useQueryClient>, run: BotRun) {
+  queryClient.invalidateQueries({ queryKey: queryKeys.botRuns(run.account_id) })
+  queryClient.invalidateQueries({ queryKey: queryKeys.botRun(run.id) })
+  queryClient.invalidateQueries({ queryKey: queryKeys.digitContracts(run.account_id) })
+  queryClient.invalidateQueries({ queryKey: queryKeys.wallet(run.account_id) })
+  queryClient.invalidateQueries({ queryKey: queryKeys.transactions(run.account_id) })
+}
+
+export function useStartBotRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: StartRunInput) => botApi.start(input),
+    onSuccess: (run) => invalidateForRun(queryClient, run),
+  })
+}
+
+export function useStopBotRun() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (runID: string) => botApi.stop(runID),
+    onSuccess: (run) => invalidateForRun(queryClient, run),
   })
 }

@@ -3,6 +3,7 @@ import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { humanMessage } from '@/components/ErrorState'
+import { DigitPicker } from './DigitPicker'
 import { useDigitQuote } from '@/hooks/useQueries'
 import { cn } from '@/lib/cn'
 import { money } from '@/lib/format'
@@ -33,6 +34,7 @@ export function DigitTicket({
   submitting,
   error,
   onSubmit,
+  flushTop = false,
 }: {
   contractType: DigitContractType
   symbol: TradeSymbol | null
@@ -42,6 +44,12 @@ export function DigitTicket({
   submitting: boolean
   error: ApiError | null
   onSubmit: (values: DigitTicketSubmit) => void
+  /**
+   * Drop the sheet's own rounded top on a phone, for when something else sits
+   * directly above it inside the same sticky card — the trading-mode toggle —
+   * and two rounded edges would stack.
+   */
+  flushTop?: boolean
 }) {
   const [stake, setStake] = useState('10')
   const [digit, setDigit] = useState(0)
@@ -89,7 +97,12 @@ export function DigitTicket({
   }
 
   return (
-    <div className="rounded-t-3xl border-t border-border bg-surface p-4 lg:rounded-card lg:border">
+    <div
+      className={cn(
+        'bg-surface p-4 lg:rounded-card lg:border lg:border-border',
+        flushTop ? 'pt-2' : 'rounded-t-3xl border-t border-border',
+      )}
+    >
       {contractType === 'matches_differs' ? (
         <DigitPicker label="Digit" value={digit} onChange={setDigit} />
       ) : null}
@@ -166,39 +179,6 @@ export function DigitTicket({
   )
 }
 
-function DigitPicker({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: number
-  onChange: (n: number) => void
-}) {
-  return (
-    <div>
-      <p className="text-meta font-medium text-muted">{label}</p>
-      <div className="mt-1.5 flex flex-wrap gap-1">
-        {Array.from({ length: 10 }, (_, d) => (
-          <button
-            key={d}
-            type="button"
-            onClick={() => onChange(d)}
-            aria-pressed={value === d}
-            className={cn(
-              'flex h-9 w-9 items-center justify-center rounded-lg text-body font-semibold transition-colors',
-              value === d
-                ? 'bg-accent text-white'
-                : 'bg-elevated text-muted hover:text-text',
-            )}
-          >
-            {d}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 function OutcomeButton({
   label,

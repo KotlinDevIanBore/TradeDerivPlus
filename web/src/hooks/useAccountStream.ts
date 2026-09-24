@@ -4,7 +4,7 @@ import { createSocket } from '@/lib/socket'
 import { useSessionStore } from '@/store/session'
 import { dec } from '@/lib/money'
 import { queryKeys } from '@/lib/queryKeys'
-import type { DigitContract, Trade, Wallet } from '@/types'
+import type { BotRun, DigitContract, Trade, Wallet } from '@/types'
 
 export interface AccountEvent {
   type:
@@ -14,6 +14,7 @@ export interface AccountEvent {
     | 'trade_closed'
     | 'digit_opened'
     | 'digit_settled'
+    | 'bot_run'
     | 'kyc'
     | 'account'
   payload: unknown
@@ -48,7 +49,10 @@ export interface DigitSettledEvent {
  * position was auto-closed at its stop loss while the user was elsewhere, and
  * unlocks the Withdraw button the moment an admin approves verification.
  */
-export function useAccountStream(accountId: string | null, onEvent?: (event: AccountEvent) => void) {
+export function useAccountStream(
+  accountId: string | null,
+  onEvent?: (event: AccountEvent) => void,
+) {
   const token = useSessionStore((s) => s.accessToken)
   const queryClient = useQueryClient()
 
@@ -110,13 +114,41 @@ export function useAccountStream(accountId: string | null, onEvent?: (event: Acc
             }
             break
 
+          case 'bot_run': {
+            // Written into the cache rather than invalidated, so the run card
+            // moves the moment the server says so. A run emits one of these on
+            // start, after every settlement and on stop, which is what makes the
+            // card live; useLiveBotRun's 2s poll is only the fallback for a
+            // socket that dropped.
+            const run = event.payload as BotRun
+            if (!run?.id) break
+            queryClient.setQueryData(queryKeys.botRun(run.id), run)
+            // The live-run list is a page of one, and the shape has to match what
+            // the API returns or the card would read an object where it expects a
+            // list. A stopped run leaves the list empty, which is how the surface
+            // gets its ticket back.
+            queryClient.setQueryData(queryKeys.botRuns(run.account_id, 'live'), {
+              items: run.status === 'stopped' ? [] : [run],
+              total: run.status === 'stopped' ? 0 : 1,
+              page: 1,
+              limit: 1,
+            })
+            // And let the history list refetch, so "how did the last one end"
+            // is answerable the moment a run stops rather than at the next
+            // mount. The prefix key covers every status, including the 'live'
+            // entry just written — which refetches to the same value.
+            queryClient.invalidateQueries({ queryKey: queryKeys.botRuns(run.account_id) })
+            queryClient.invalidateQueries({ queryKey: queryKeys.digitContracts(run.account_id) })
+            break
+          }
+
           case 'digit_opened':
           case 'digit_settled': {
-            const payload = event.payload as { contract?: { account_id?: string }; account_id?: string }
-            const id =
-              payload.contract?.account_id ??
-              payload.account_id ??
-              accountId
+            const payload = event.payload as {
+              contract?: { account_id?: string }
+              account_id?: string
+            }
+            const id = payload.contract?.account_id ?? payload.account_id ?? accountId
             if (id) {
               queryClient.invalidateQueries({ queryKey: queryKeys.digitContracts(id) })
               queryClient.invalidateQueries({ queryKey: queryKeys.wallet(id) })

@@ -54,7 +54,65 @@ var (
 		Name: "ledger_drift_accounts",
 		Help: "Accounts whose ledger sum disagrees with their cached balance. Must be zero.",
 	})
+
+	// Automated trading. A bot places money repeatedly and without a person
+	// watching, so what it did has to be visible without reading the database.
+	botRunsLive = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "bot_runs_live",
+		Help: "Automated runs currently running or stopping.",
+	})
+
+	// One contract per run per second is the ceiling by construction: a run holds
+	// one contract at a time and contracts take about a second to settle. So
+	//
+	//	increase(bot_contracts_total[1m]) > bot_runs_live * 60
+	//
+	// is not load, it is a bug — that is the alert this counter exists for, and
+	// it only means that if each contract increments it exactly once. It used to
+	// increment twice, once on placement and once on its outcome, which made
+	// every reading of the whole metric double the truth.
+	//
+	// So this counts settlements, one per contract, with the outcome that makes
+	// the count worth breaking down. Placements have their own counter below.
+	botContractsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bot_contracts_total",
+		Help: "Contracts settled for automated runs, one per contract, by outcome.",
+	}, []string{"outcome"})
+
+	// Placements, which lead settlements by about a second. Separate rather than
+	// another label on the counter above, because a placement and a settlement
+	// are two events about one contract and summing them counts it twice.
+	botContractsPlaced = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "bot_contracts_placed_total",
+		Help: "Contracts placed by automated runs, one per contract.",
+	})
+
+	// What went wrong when a run tried to place, by the error's own code. A run
+	// that cannot place looks exactly like a run that is not placing without
+	// this — bot_contracts_placed_total flat either way.
+	botPlacementErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bot_placement_errors_total",
+		Help: "Failed placement attempts by automated runs, by error code.",
+	}, []string{"code"})
+
+	botRunsStoppedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bot_runs_stopped_total",
+		Help: "Automated runs that ended, by reason. A rising 'error' is a defect.",
+	}, []string{"reason"})
 )
+
+// RecordBotContract is called once per contract, when it settles.
+func RecordBotContract(outcome string) { botContractsTotal.WithLabelValues(outcome).Inc() }
+
+// RecordBotPlacement is called once per contract, when it is placed.
+func RecordBotPlacement() { botContractsPlaced.Inc() }
+
+// RecordBotPlacementError is called when a placement attempt fails, with the
+// error's code rather than its message.
+func RecordBotPlacementError(code string) { botPlacementErrors.WithLabelValues(code).Inc() }
+
+// RecordBotRunStopped is called once per run, with why it ended.
+func RecordBotRunStopped(reason string) { botRunsStoppedTotal.WithLabelValues(reason).Inc() }
 
 // RecordDeposit is called when a deposit settles either way.
 func RecordDeposit(status string) { depositsTotal.WithLabelValues(status).Inc() }
@@ -86,6 +144,7 @@ func Middleware() gin.HandlerFunc {
 type Sampler interface {
 	OpenTrades(ctx context.Context) (int, error)
 	DriftedAccounts(ctx context.Context) (int, error)
+	LiveBotRuns(ctx context.Context) (int, error)
 	Connections() int
 }
 
@@ -110,6 +169,12 @@ func Collect(ctx context.Context, s Sampler, log *slog.Logger, every time.Durati
 			}
 		} else {
 			log.Warn("metrics: ledger drift", "err", err)
+		}
+
+		if n, err := s.LiveBotRuns(sampleCtx); err == nil {
+			botRunsLive.Set(float64(n))
+		} else {
+			log.Warn("metrics: live bot runs", "err", err)
 		}
 
 		wsConnections.Set(float64(s.Connections()))

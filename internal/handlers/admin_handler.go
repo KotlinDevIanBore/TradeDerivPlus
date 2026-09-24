@@ -324,3 +324,76 @@ func (h *AdminHandler) accountParam(c *gin.Context) (uuid.UUID, bool) {
 	}
 	return accountID, true
 }
+
+// --- Automated trading -----------------------------------------------------
+
+// POST /admin/bot/enable
+//
+// The way back from the kill switch. A reason is required, the same as it is for
+// unfreezing an account: this is the restorative direction, and the restorative
+// direction is where the explanation lives.
+func (h *AdminHandler) EnableBots(c *gin.Context) {
+	var req reasonRequest
+	_ = c.ShouldBindJSON(&req)
+
+	if err := h.admin.EnableBots(c.Request.Context(), middleware.AdminID(c), req.Reason); err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"bot_enabled": true})
+}
+
+// GET /admin/bot/runs?status=live|stopped
+//
+// Paged, unlike the user's own list of runs: this one is every run on the
+// platform and history does not stop growing.
+func (h *AdminHandler) BotRuns(c *gin.Context) {
+	limit := clampInt(c.Query("limit"), 25, 1, 100)
+	page, offset := resolvePage(c, limit)
+
+	result, err := h.admin.ListBotRuns(c.Request.Context(), c.Query("status"), limit, offset)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	result.Page, result.Pages = page, pageCount(result.Total, limit)
+	c.JSON(http.StatusOK, result)
+}
+
+// POST /admin/bot/runs/:id/stop
+//
+// Stops one run. A reason is required and recorded, like every other console
+// action that reaches into a user's account.
+func (h *AdminHandler) StopBotRun(c *gin.Context) {
+	runID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		badRequest(c, "A valid run id is required", "")
+		return
+	}
+
+	var req reasonRequest
+	_ = c.ShouldBindJSON(&req)
+
+	run, err := h.admin.StopBotRun(c.Request.Context(), middleware.AdminID(c), runID, req.Reason)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, run)
+}
+
+// POST /admin/bot/kill
+//
+// Stops every live run and turns automated trading off, in one audited
+// transaction. A reason is required, like every other action that touches money.
+func (h *AdminHandler) KillBots(c *gin.Context) {
+	var req reasonRequest
+	_ = c.ShouldBindJSON(&req)
+
+	stopped, err := h.admin.KillBots(c.Request.Context(), middleware.AdminID(c), req.Reason)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"runs_stopped": stopped, "bot_enabled": false})
+}

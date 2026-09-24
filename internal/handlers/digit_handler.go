@@ -152,7 +152,17 @@ func (h *DigitHandler) List(c *gin.Context) {
 	limit := clampInt(c.Query("limit"), 25, 1, 100)
 	page, offset := resolvePage(c, limit)
 
-	items, total, err := h.digits.List(c.Request.Context(), middleware.UserID(c), accountID, status, limit, offset)
+	var botRunID *uuid.UUID
+	if raw := c.Query("bot_run_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			badRequest(c, "Invalid bot_run_id", "")
+			return
+		}
+		botRunID = &id
+	}
+
+	items, total, err := h.digits.List(c.Request.Context(), middleware.UserID(c), accountID, status, botRunID, limit, offset)
 	if err != nil {
 		fail(c, err)
 		return

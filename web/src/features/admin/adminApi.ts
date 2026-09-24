@@ -1,8 +1,9 @@
 import { API_BASE, ApiError, type ApiErrorBody } from '@/api/client'
 import { qs } from '@/api/client'
-import type { Account, Page } from '@/types'
+import type { Account, BotRun, Page } from '@/types'
 import { useAdminSession } from './adminSession'
 import type {
+  AdminBotRun,
   AdminLoginResult,
   AdminTransaction,
   AdminUserDetail,
@@ -130,6 +131,12 @@ export const adminApi = {
   kyc: (status = 'pending', page = 1) =>
     request<Page<KYCSubmission>>(`/admin/kyc${qs({ status, page, limit: 25 })}`),
 
+  /** status: 'live', 'stopped', or '' for both. Paged — history has no ceiling. */
+  botRuns: (p: { status?: string; page?: number; limit?: number } = {}) =>
+    request<Page<AdminBotRun>>(
+      `/admin/bot/runs${qs({ status: p.status, page: p.page ?? 1, limit: p.limit ?? 25 })}`,
+    ),
+
   auditLog: (p: { page?: number; action?: string; admin_id?: string } = {}) =>
     request<Page<AuditEntry>>(
       `/admin/audit-log${qs({ page: p.page ?? 1, limit: 50, action: p.action, admin_id: p.admin_id })}`,
@@ -151,6 +158,21 @@ export const adminApi = {
 
   rejectKYC: (id: string, reason: string) =>
     request<KYCSubmission>(`/admin/kyc/${id}/reject`, 'POST', { reason }),
+
+  /** Stops one run. Automated trading stays on and every other run keeps going. */
+  stopBotRun: (id: string, reason: string) =>
+    request<BotRun>(`/admin/bot/runs/${id}/stop`, 'POST', { reason }),
+
+  /**
+   * Stops every live run and turns automated trading off. Both, together:
+   * stopping the runs alone would leave users free to start new ones.
+   */
+  killBots: (reason: string) =>
+    request<{ runs_stopped: number; bot_enabled: boolean }>('/admin/bot/kill', 'POST', { reason }),
+
+  /** The way back. A reason is required, as it is for unfreezing an account. */
+  enableBots: (reason: string) =>
+    request<{ bot_enabled: boolean }>('/admin/bot/enable', 'POST', { reason }),
 }
 
 /** Admin query keys are prefixed so they never collide with the user app's. */
@@ -161,4 +183,5 @@ export const adminKeys = {
   transactions: (p: unknown) => ['admin', 'transactions', p] as const,
   kyc: (status: string, page: number) => ['admin', 'kyc', status, page] as const,
   audit: (p: unknown) => ['admin', 'audit', p] as const,
+  botRuns: (p: unknown) => ['admin', 'bot-runs', p] as const,
 }

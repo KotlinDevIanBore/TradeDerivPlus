@@ -26,11 +26,22 @@ var (
 	ErrMarketClosed       = errors.New("This market is not available right now")
 	ErrAccountExists      = errors.New("You already have an account of this type")
 	ErrTradeNotOpen       = errors.New("This position is already closed")
+	ErrTooManyOpen        = errors.New("Wait for your open contracts to settle before opening another")
+
 	ErrAccountFrozen      = errors.New("This account is frozen. Contact support")
 	ErrAdminExists        = errors.New("That username is taken")
 	ErrPasswordUnchanged  = errors.New("Choose a password you have not used here before")
 	ErrMustChangePassword = errors.New("You must change the default password before continuing")
 	ErrAlreadyReviewed    = errors.New("This submission has already been reviewed")
+
+	// Automated runs.
+	ErrBotDisabled          = errors.New("Automated trading is not available on your account yet")
+	ErrBotRealMoneyDisabled = errors.New("Automated runs are available on demo accounts for now")
+	ErrBotRunActive         = errors.New("A run is already live on this account")
+	ErrBotCapacity          = errors.New("Too many automated runs are live right now. Try again shortly")
+	// Never reaches a person: only BotService sets BotRunID, and it is what a
+	// placement gets when its run was stopped while the placement was in flight.
+	ErrBotRunNotLive = errors.New("This automated run has already stopped")
 )
 
 // ValidationError carries a field name so the UI can put the message under the
@@ -44,3 +55,9 @@ func (e *ValidationError) Error() string { return e.Message }
 func (e *ValidationError) Unwrap() error { return ErrValidation }
 
 func invalid(field, msg string) error { return &ValidationError{Field: field, Message: msg} }
+
+// ValidationFor is the exported form, for the few validations a handler has to
+// make itself because they are about the request's shape rather than the
+// domain — a money field that is not a number, say. The message still reaches
+// the user verbatim, so it is written as a sentence like the rest.
+func ValidationFor(field, msg string) error { return invalid(field, msg) }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { LineChart } from 'lucide-react'
 import { ApiError } from '@/api/client'
@@ -9,7 +9,18 @@ import { Button } from '@/components/ui/Button'
 import { toast } from '@/components/ui/Toast'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useWatchSymbols } from '@/hooks/usePriceFeed'
-import { useOpenDigit, useOpenDigits, useSymbols, useWallet } from '@/hooks/useQueries'
+import {
+  useDigitQuote,
+  useLiveBotRun,
+  useMe,
+  useOpenDigit,
+  useOpenDigits,
+  useBotRuns,
+  useStartBotRun,
+  useStopBotRun,
+  useSymbols,
+  useWallet,
+} from '@/hooks/useQueries'
 import { money, signedPercent } from '@/lib/format'
 import { mergeParams } from '@/lib/searchParams'
 import { useConnectionStatus, usePrice, useTickHistory } from '@/store/market'
@@ -19,11 +30,14 @@ import { windowChange, type ChartRange } from './chartRange'
 import { ChartSkeleton } from './ChartSkeleton'
 import { ContractTypeTabs } from './ContractTypeTabs'
 import { DigitDistributionRow } from './DigitDistributionRow'
+import { BotRunCard } from './BotRunCard'
+import { BotTicket, type BotTicketConfig, type BotTicketSubmit } from './BotTicket'
 import { DigitTicket, type DigitTicketSubmit } from './DigitTicket'
 import { PriceChartLazy } from './PriceChartLazy'
 import { SessionStrip } from './SessionStrip'
 import { digitSessionStats } from './sessionStats'
 import { SymbolPicker } from './SymbolPicker'
+import { TradingModeTabs, type TradingMode } from './TradingModeTabs'
 
 const DEFAULT_SYMBOL = 'R_75'
 
@@ -33,7 +47,7 @@ const DEFAULT_SYMBOL = 'R_75'
  */
 export function DigitTradeScreen() {
   const [params, setParams] = useSearchParams()
-  const { accountId } = useActiveAccount()
+  const { accountId, isReal } = useActiveAccount()
 
   const symbolsQuery = useSymbols()
   const wallet = useWallet(accountId)
@@ -50,6 +64,78 @@ export function DigitTradeScreen() {
   const [contractType, setContractType] = useState<DigitContractType>('even_odd')
   const [ticketKey, setTicketKey] = useState(0)
   const [waitedForPrice, setWaitedForPrice] = useState(false)
+
+  const me = useMe()
+  const botEnabled = Boolean(me.data?.bot_enabled)
+  const { run: liveRun } = useLiveBotRun(botEnabled ? accountId : null)
+
+  // A live run forces AUTO. Leaving MANUAL selectable while one is placing would
+  // suggest it had stopped, and it has not — stopping is a deliberate act.
+  const requestedMode: TradingMode = params.get('mode') === 'auto' ? 'auto' : 'manual'
+  const mode: TradingMode = liveRun ? 'auto' : requestedMode
+  const manualLocked = liveRun ? 'Stop the run to trade manually.' : undefined
+
+  // The bot ticket owns its selection and stake and reports them here, so the
+  // screen can fetch the quote its economics line needs while the ticket stays a
+  // component that can be rendered without a query client.
+  const [botConfig, setBotConfig] = useState<BotTicketConfig | null>(null)
+  const onBotConfigChange = useCallback((c: BotTicketConfig) => setBotConfig(c), [])
+  const botQuote = useDigitQuote(
+    botConfig?.contractType ?? contractType,
+    botConfig?.selection ?? {},
+    botConfig?.stake ?? '',
+    mode === 'auto' && Boolean(botConfig),
+  )
+  const startRun = useStartBotRun()
+  const stopRun = useStopBotRun()
+
+  // The last run to finish, so the cell can report how it ended for a while
+  // rather than going blank the moment it stops.
+  const recentRuns = useBotRuns(botEnabled ? accountId : null, 'stopped', 1)
+  const lastStopped = recentRuns.data?.items?.[0] ?? null
+
+  // The run's own most recent settlement, for the card's last-contract line.
+  const lastRunContract = useMemo(() => {
+    if (!liveRun) return undefined
+    return (settledDigits.data?.items ?? []).find((c) => c.bot_run_id === liveRun.id)
+  }, [liveRun, settledDigits.data])
+
+  // The Auto cell. Only rendered when the feature is on for this user, so a
+  // surface without automated trading is exactly as it was.
+  const autoCell = botEnabled
+    ? liveRun
+      ? {
+          value: `${liveRun.status === 'stopping' ? 'Stopping' : 'Running'} · ${liveRun.contracts_placed}${
+            liveRun.limits.max_contracts ? `/${liveRun.limits.max_contracts}` : ''
+          }`,
+          title: 'An automated run is placing contracts',
+          className: liveRun.status === 'stopping' ? 'text-warning' : 'text-profit',
+        }
+      : lastStopped
+        ? {
+            value: `Stopped · ${stopReasonWords(lastStopped.stop_reason)}`,
+            title: 'The most recent automated run',
+            className: 'text-muted',
+          }
+        : { value: '—', title: 'No automated run', className: 'text-faint' }
+    : undefined
+
+  const startBotRun = (values: BotTicketSubmit) => {
+    if (!accountId || !symbol) return
+    startRun.mutate({
+      account_id: accountId,
+      symbol: symbol.code,
+      contract_type: values.contractType,
+      selection: values.selection,
+      stake: values.stake,
+      interval_ms: values.intervalMS,
+      limits: values.limits,
+    })
+  }
+
+  const selectMode = (next: TradingMode) =>
+    // Merged rather than replaced, so switching mode does not drop the symbol.
+    setParams(mergeParams({ mode: next === 'auto' ? 'auto' : null }))
 
   const symbolCode = params.get('symbol') ?? DEFAULT_SYMBOL
   const allSymbols = symbolsQuery.data?.items ?? []
@@ -182,33 +268,122 @@ export function DigitTradeScreen() {
         <div className="mt-3 px-gutter lg:px-0">
           <SessionStrip
             digitSession={digitSession}
+            auto={autoCell}
             isLoading={openDigits.isLoading && settledDigits.isLoading}
           />
         </div>
       </div>
 
       <div className="sticky bottom-tabbar z-20 mt-4 lg:static lg:mt-0">
-        <DigitTicket
-          key={ticketKey}
-          contractType={contractType}
-          symbol={symbol}
-          wallet={wallet.data}
-          disabled={!tick || stale}
-          disabledReason={
-            !tick ? 'Waiting for a live price…' : stale ? 'Market feed is reconnecting…' : undefined
-          }
-          submitting={openDigit.isPending}
-          error={error}
-          onSubmit={submit}
-        />
+        {botEnabled ? (
+          <div className="rounded-t-3xl border-t border-border bg-surface px-4 pt-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0 lg:pt-0">
+            <p className="mb-1.5 hidden text-nano font-semibold uppercase tracking-wide text-faint lg:block">
+              Trading mode
+            </p>
+            <TradingModeTabs
+              value={mode}
+              onChange={selectMode}
+              manualDisabledReason={manualLocked}
+            />
+          </div>
+        ) : null}
+        {mode === 'auto' && liveRun ? (
+          <BotRunCard
+            run={liveRun}
+            lastContract={lastRunContract}
+            stopping={stopRun.isPending}
+            onStop={() => stopRun.mutate(liveRun.id)}
+            flushTop={botEnabled}
+          />
+        ) : mode === 'auto' ? (
+          <BotTicket
+            contractType={contractType}
+            symbol={symbol}
+            wallet={wallet.data}
+            quote={botQuote.data}
+            maxStake={me.data?.digit_max_stake}
+            isReal={isReal}
+            realMoneyEnabled={Boolean(me.data?.bot_real_money_enabled)}
+            disabled={!tick || stale}
+            disabledReason={
+              !tick
+                ? 'Waiting for a live price…'
+                : stale
+                  ? 'Market feed is reconnecting…'
+                  : undefined
+            }
+            submitting={startRun.isPending}
+            error={startRun.error as ApiError | null}
+            onConfigChange={onBotConfigChange}
+            onSubmit={startBotRun}
+            flushTop={botEnabled}
+          />
+        ) : (
+          <DigitTicket
+            key={ticketKey}
+            flushTop={botEnabled}
+            contractType={contractType}
+            symbol={symbol}
+            wallet={wallet.data}
+            disabled={!tick || stale}
+            disabledReason={
+              !tick
+                ? 'Waiting for a live price…'
+                : stale
+                  ? 'Market feed is reconnecting…'
+                  : undefined
+            }
+            submitting={openDigit.isPending}
+            error={error}
+            onSubmit={submit}
+          />
+        )}
       </div>
     </div>
   )
 }
 
+/** A stop reason in the fewest words that still say what happened. */
+function stopReasonWords(reason: string | null): string {
+  switch (reason) {
+    case 'take_profit':
+      return 'take profit'
+    case 'stop_loss':
+      return 'stop loss'
+    case 'max_consecutive_losses':
+      return 'losing streak'
+    case 'max_contracts':
+      return 'all contracts'
+    case 'max_duration':
+      return 'time limit'
+    case 'user':
+      return 'you stopped it'
+    case 'insufficient_funds':
+      return 'out of funds'
+    case 'account_frozen':
+      return 'account frozen'
+    case 'feed_down':
+      return 'feed down'
+    case 'admin_kill':
+    case 'disabled':
+      return 'turned off'
+    case 'restart':
+    case 'shutdown':
+      return 'service restart'
+    default:
+      return reason ?? 'unknown'
+  }
+}
+
 function labelSelection(
   type: DigitContractType,
-  selection: { parity?: string; mode?: string; side?: string; digit?: number; barrier?: number },
+  selection: {
+    parity?: string
+    mode?: string
+    side?: string
+    digit?: number
+    barrier?: number
+  },
 ): string {
   switch (type) {
     case 'even_odd':

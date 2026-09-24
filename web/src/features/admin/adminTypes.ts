@@ -1,4 +1,13 @@
-import type { Account, KYCStatus, Transaction, Trade, User, Wallet } from '@/types'
+import type {
+  Account,
+  AccountType,
+  BotRun,
+  KYCStatus,
+  Transaction,
+  Trade,
+  User,
+  Wallet,
+} from '@/types'
 
 export type AdminRole = 'admin' | 'support' | 'restricted'
 
@@ -40,6 +49,10 @@ export interface Dashboard {
   open_positions: number
   live_connections: number
   pending_kyc: number
+  /** Runs placing contracts right now, across every account. */
+  live_bot_runs: number
+  /** The global switch, read from its row rather than through the settings cache. */
+  bot_enabled: boolean
   /** Accounts whose ledger and cached balance disagree. Healthy is zero. */
   drifted_accounts: number
   drift: AccountDrift[]
@@ -94,6 +107,22 @@ export type AuditAction =
   | 'manual_adjustment'
   | 'kyc_approve'
   | 'kyc_reject'
+  | 'bot_kill'
+  | 'bot_enable'
+  | 'bot_run_stop'
+
+/**
+ * A run as the console sees it: the run row plus whose it is. The user app's
+ * `BotRun` is the same row without the owner — a user polling their own run does
+ * not need telling whose it is, and the admin read path is the only one that
+ * joins for it.
+ */
+export interface AdminBotRun extends BotRun {
+  account_number: string
+  account_type: AccountType
+  user_id: string
+  user_phone: string
+}
 
 export interface AuditEntry {
   id: string

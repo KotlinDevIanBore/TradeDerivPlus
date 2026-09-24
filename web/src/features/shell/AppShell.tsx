@@ -4,11 +4,17 @@ import { Button } from '@/components/ui/Button'
 import { EmptyState } from '@/components/EmptyState'
 import { Panel } from '@/components/ui/Panel'
 import { toast } from '@/components/ui/Toast'
-import { useAccountStream, type AccountEvent, type DigitSettledEvent, type TradeClosedEvent } from '@/hooks/useAccountStream'
+import {
+  useAccountStream,
+  type AccountEvent,
+  type DigitSettledEvent,
+  type TradeClosedEvent,
+} from '@/hooks/useAccountStream'
 import { usePriceFeed } from '@/hooks/usePriceFeed'
 import { useSignalFeed, useSignalStream } from '@/hooks/useSignalStream'
 import { useCreateAccount, useMe, useWallet } from '@/hooks/useQueries'
 import { money, signedMoney } from '@/lib/format'
+import { announceRunStopped } from '@/features/trading/botRunToast'
 import { AccountPanel } from '@/features/profile/AccountPanel'
 import { PositionsPanel } from '@/features/portfolio/PositionsPanel'
 import { SignalsPanel } from '@/features/signals/SignalsPanel'
@@ -16,6 +22,7 @@ import { DepositSheet } from '@/features/wallet/DepositSheet'
 import { HistoryPanel } from '@/features/wallet/HistoryPanel'
 import { WithdrawSheet } from '@/features/wallet/WithdrawSheet'
 import { useIsAuthenticated, useSessionStore } from '@/store/session'
+import type { BotRun } from '@/types'
 import { AccountSwitcher } from './AccountSwitcher'
 import { NavDrawer } from './NavDrawer'
 import { overlay, useOverlayOpen } from './overlays'
@@ -107,6 +114,13 @@ export function AppShell() {
     // Soft confirmation — Positions/History also update; keep toast brief.
     if (event.type === 'digit_settled') {
       const { contract, reason } = event.payload as DigitSettledEvent
+
+      // A contract a run placed is not news: the run card is on screen showing
+      // the outcome, the counters and the last result already. One toast every
+      // couple of seconds for half an hour would bury everything that is news,
+      // including the toast saying the run stopped.
+      if (contract.bot_run_id) return
+
       if (reason === 'auto_void' || contract.status === 'void') {
         toast.info(`${contract.symbol_code} voided`, 'Stake refunded')
         return
@@ -118,6 +132,15 @@ export function AppShell() {
       if (contract.status === 'lost') {
         toast.info(`${contract.symbol_code} lost`, signedMoney(contract.pnl))
       }
+    }
+
+    // A run announces itself on start, on every settlement and on stop. Only the
+    // stop is worth a toast: the card is already on screen showing the rest, and
+    // a notification per contract would be a stream of noise.
+    if (event.type === 'bot_run') {
+      const run = event.payload as BotRun
+      if (run?.status !== 'stopped' || !run.stop_reason) return
+      announceRunStopped(run)
     }
   })
 
@@ -135,10 +158,7 @@ export function AppShell() {
           title="Create your first account"
           hint="Start with a demo account funded with practice money."
           action={
-            <Button
-              loading={createAccount.isPending}
-              onClick={() => createAccount.mutate('demo')}
-            >
+            <Button loading={createAccount.isPending} onClick={() => createAccount.mutate('demo')}>
               Create demo account
             </Button>
           }

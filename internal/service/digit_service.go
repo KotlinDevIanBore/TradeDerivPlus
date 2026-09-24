@@ -22,17 +22,48 @@ const DigitVoidGrace = 5 * time.Second
 // this catches missed ticks and process downtime.
 const DigitSweepEvery = 5 * time.Second
 
+// Default limits, used when a field of DigitLimits is left zero. They apply to
+// every caller, a human at the ticket as much as anything automated: a client
+// guard is advice, and the only place a limit cannot be bypassed is here.
+var (
+	defaultDigitMaxStake       = decimal.NewFromInt(100)
+	defaultDigitMaxOpenPerAcct = 5
+)
+
+// DigitLimits bounds one contract and one account. There is no way to express
+// "unlimited": a zero field takes the default above rather than removing the
+// limit, because the dangerous direction of a mistake here is upwards.
+type DigitLimits struct {
+	// MaxStake is the largest stake a single contract may carry.
+	MaxStake decimal.Decimal
+	// MaxOpenPerAccount caps contracts awaiting settlement on one account. It
+	// bounds both a runaway client and the per-tick settlement work each open
+	// contract adds to the feed goroutine.
+	MaxOpenPerAccount int
+}
+
+func (l DigitLimits) withDefaults() DigitLimits {
+	if l.MaxStake.LessThanOrEqual(decimal.Zero) {
+		l.MaxStake = defaultDigitMaxStake
+	}
+	if l.MaxOpenPerAccount <= 0 {
+		l.MaxOpenPerAccount = defaultDigitMaxOpenPerAcct
+	}
+	return l
+}
+
 // DigitService is the parallel binary last-digit product. It does not touch
 // CFD trades or pnl.go.
 type DigitService struct {
-	store *repository.Store
-	feed  *FeedService
-	hub   Broadcaster
-	log   *slog.Logger
+	store  *repository.Store
+	feed   *FeedService
+	hub    Broadcaster
+	limits DigitLimits
+	log    *slog.Logger
 }
 
-func NewDigitService(store *repository.Store, feed *FeedService, hub Broadcaster, log *slog.Logger) *DigitService {
-	return &DigitService{store: store, feed: feed, hub: hub, log: log}
+func NewDigitService(store *repository.Store, feed *FeedService, hub Broadcaster, limits DigitLimits, log *slog.Logger) *DigitService {
+	return &DigitService{store: store, feed: feed, hub: hub, limits: limits.withDefaults(), log: log}
 }
 
 // Start registers the tick settler and runs an immediate then periodic sweep.
@@ -61,6 +92,12 @@ type OpenDigitInput struct {
 	ContractType string
 	Selection    models.DigitSelection
 	Stake        decimal.Decimal
+
+	// BotRunID marks the contract as placed by an automated run. Set only by
+	// BotService; nil means a person placed it. There is deliberately no separate
+	// entry point for the bot — it comes through this same function, so the
+	// locking, the ledger write and the freeze check are the ones already tested.
+	BotRunID *uuid.UUID
 }
 
 func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.DigitContract, error) {
@@ -76,6 +113,9 @@ func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.Dig
 	}
 	if in.Stake.LessThanOrEqual(decimal.Zero) {
 		return nil, invalid("stake", "Enter a stake greater than zero")
+	}
+	if in.Stake.GreaterThan(s.limits.MaxStake) {
+		return nil, invalid("stake", "The most you can stake on one contract is $"+s.limits.MaxStake.StringFixed(2))
 	}
 
 	symbol, err := s.store.Symbols.GetByCode(ctx, in.SymbolCode)
@@ -120,6 +160,7 @@ func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.Dig
 		EntryDigit:      entryDigit,
 		EntryTickEpoch:  tick.Epoch,
 		VoidAfter:       time.Now().UTC().Add(DigitVoidGrace),
+		BotRunID:        in.BotRunID,
 		SymbolCode:      symbol.Code,
 		SymbolName:      symbol.DisplayName,
 		PipSize:         symbol.PipSize,
@@ -138,6 +179,42 @@ func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.Dig
 		if locked.IsFrozen() {
 			return ErrAccountFrozen
 		}
+		// Counted here rather than before the transaction: the wallet lock above
+		// serialises every Open on this account, so two concurrent callers cannot
+		// both read a count below the cap and both insert.
+		open, err := st.DigitContracts.CountOpenByAccount(ctx, account.ID)
+		if err != nil {
+			return err
+		}
+		if open >= s.limits.MaxOpenPerAccount {
+			return ErrTooManyOpen
+		}
+		// A run's placement takes its run row's lock, and every stop takes the
+		// same lock to decide between 'stopping' and 'stopped'. That is what
+		// makes the two orderings both correct: a stop arriving after this line
+		// waits, then counts this contract and holds the run open for it; a stop
+		// that got here first has already written the ending, and this placement
+		// reads it and refuses.
+		//
+		// Without the lock the stop's count could not see an Open that had not
+		// committed, so it finalised the run outright — and the contract then
+		// committed under a run that was already stopped, releasing the account's
+		// one-live-run slot while one of its contracts was still in flight.
+		if in.BotRunID != nil {
+			run, err := st.BotRuns.GetForUpdate(ctx, *in.BotRunID)
+			if err != nil {
+				if errors.Is(err, repository.ErrNotFound) {
+					return ErrNotFound
+				}
+				return err
+			}
+			// Only a running run may place. 'stopping' means a stop was asked for
+			// and is waiting on a contract; another one is exactly what it is
+			// waiting to not have.
+			if run.Status != models.BotRunning {
+				return ErrBotRunNotLive
+			}
+		}
 		balanceType := pickBalance(w, in.Stake)
 		if balanceType == "" {
 			return ErrInsufficientFunds
@@ -145,7 +222,26 @@ func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.Dig
 		if err := st.DigitContracts.Create(ctx, contract); err != nil {
 			return err
 		}
+		// Counted in the same transaction as the contract, so a placement that
+		// rolled back is never counted and a committed one never missed.
+		if in.BotRunID != nil {
+			if err := st.BotRuns.IncrementPlaced(ctx, *in.BotRunID); err != nil {
+				return err
+			}
+		}
 		ref := contract.ID.String()
+		meta := map[string]any{
+			"symbol":        symbol.Code,
+			"contract_type": in.ContractType,
+			"entry":         tick.Price.String(),
+			"entry_digit":   entryDigit,
+		}
+		// The ledger row carries the provenance too, not just the contract. A
+		// statement is read on its own, and "which of these debits was the bot's"
+		// should be answerable without joining back to digit_contracts.
+		if in.BotRunID != nil {
+			meta["bot_run_id"] = in.BotRunID.String()
+		}
 		if err := st.Transactions.Insert(ctx, &models.Transaction{
 			AccountID:   account.ID,
 			Type:        models.TxDigitOpen,
@@ -153,12 +249,7 @@ func (s *DigitService) Open(ctx context.Context, in OpenDigitInput) (*models.Dig
 			Amount:      in.Stake.Neg(),
 			Status:      models.StatusCompleted,
 			Reference:   &ref,
-			Metadata: map[string]any{
-				"symbol":        symbol.Code,
-				"contract_type": in.ContractType,
-				"entry":         tick.Price.String(),
-				"entry_digit":   entryDigit,
-			},
+			Metadata:    meta,
 		}); err != nil {
 			return err
 		}
@@ -290,10 +381,22 @@ func (s *DigitService) settle(ctx context.Context, c *models.DigitContract, tick
 			}
 			return err
 		}
-		_ = locked
-
 		if err := st.DigitContracts.Settle(ctx, c.ID, status, tick.Price, digit, pnl); err != nil {
 			return err
+		}
+
+		// A bot's run totals are written here, in the transaction that settles the
+		// contract and moves the money, rather than by the loop that placed it.
+		// Three things follow from that: the totals cannot drift from the contracts
+		// they summarise, a contract that settles after its run has stopped still
+		// lands on the right row, and restart needs no reconciliation pass.
+		//
+		// The run id comes from the locked row, not from the caller's copy, because
+		// the locked row is the one this transaction is allowed to reason about.
+		if locked.BotRunID != nil {
+			if err := st.BotRuns.ApplySettlement(ctx, *locked.BotRunID, status, pnl); err != nil {
+				return err
+			}
 		}
 
 		var balanceType string
@@ -367,7 +470,8 @@ func (s *DigitService) voidContract(ctx context.Context, c *models.DigitContract
 	pnl := decimal.Zero // refund stake → net zero vs open debit
 	var wallet *models.Wallet
 	err := s.store.WithTx(ctx, func(st *repository.Store) error {
-		if _, err := st.DigitContracts.GetOpenForUpdate(ctx, c.ID); err != nil {
+		locked, err := st.DigitContracts.GetOpenForUpdate(ctx, c.ID)
+		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				return ErrDigitNotOpen
 			}
@@ -375,6 +479,14 @@ func (s *DigitService) voidContract(ctx context.Context, c *models.DigitContract
 		}
 		if err := st.DigitContracts.Void(ctx, c.ID, pnl); err != nil {
 			return err
+		}
+		// Same transaction, same reasoning as settle. A void is a third outcome:
+		// ApplySettlement leaves the run's losing streak alone and advances its
+		// void streak, which is how a stalled feed is noticed.
+		if locked.BotRunID != nil {
+			if err := st.BotRuns.ApplySettlement(ctx, *locked.BotRunID, models.DigitVoid, pnl); err != nil {
+				return err
+			}
 		}
 		var balanceType string
 		ref := c.ID.String()
@@ -453,16 +565,30 @@ func (s *DigitService) Quote(contractType string, sel models.DigitSelection, sta
 	if err != nil {
 		return nil, invalid("selection", err.Error())
 	}
+	prob, err := models.WinProbabilityFor(contractType, sel)
+	if err != nil {
+		return nil, invalid("selection", err.Error())
+	}
+	expected, err := models.ExpectedReturnFor(contractType, sel)
+	if err != nil {
+		return nil, invalid("selection", err.Error())
+	}
 	return &models.DigitQuote{
 		ContractType:    contractType,
 		Selection:       sel,
 		Stake:           stake.Round(2),
 		PayoutRatio:     ratio,
 		PotentialPayout: models.WinCredit(stake, ratio),
+		WinProbability:  prob,
+		ExpectedReturn:  expected,
 	}, nil
 }
 
-func (s *DigitService) List(ctx context.Context, userID, accountID uuid.UUID, status string, limit, offset int) ([]models.DigitContract, int, error) {
+// MaxStake is what the ticket shows as the ceiling, so the number in the hint and
+// the number the service enforces are the same one.
+func (s *DigitService) MaxStake() decimal.Decimal { return s.limits.MaxStake }
+
+func (s *DigitService) List(ctx context.Context, userID, accountID uuid.UUID, status string, botRunID *uuid.UUID, limit, offset int) ([]models.DigitContract, int, error) {
 	account, err := s.store.Accounts.GetByID(ctx, accountID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -476,7 +602,7 @@ func (s *DigitService) List(ctx context.Context, userID, accountID uuid.UUID, st
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	items, total, err := s.store.DigitContracts.ListByAccount(ctx, accountID, status, limit, offset)
+	items, total, err := s.store.DigitContracts.ListByAccount(ctx, accountID, status, botRunID, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shopspring/decimal"
+
 	"github.com/KotlinDevIanBore/tradederivplus/internal/config"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/handlers"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/observability"
@@ -89,21 +91,49 @@ func run() error {
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, hub, cfg, log)
 	trading := service.NewTradingService(store, feed, hub, log)
-	digits := service.NewDigitService(store, feed, hub, log)
+	digits := service.NewDigitService(store, feed, hub, service.DigitLimits{
+		MaxStake:          decimal.NewFromFloat(cfg.DigitMaxStake),
+		MaxOpenPerAccount: cfg.DigitMaxOpenPerAccount,
+	}, log)
 	signals := service.NewSignalService(store, feed, hub, cfg, log)
 	admin := service.NewAdminService(store, hub, cfg, log)
 	admin.SetConnectionCounter(hub)
 	admin.OnAction(observability.RecordAdminAction)
 	wallet.OnDepositSettled(observability.RecordDeposit)
 
-	settings := service.NewSettingsService(store, cfg.DigitContractsEnabled, log)
+	settings := service.NewSettingsService(store, service.SettingsDefaults{
+		DigitContractsEnabled: cfg.DigitContractsEnabled,
+		BotEnabled:            cfg.BotEnabled,
+		BotAllowlist:          cfg.BotAllowlist,
+		BotRealMoneyEnabled:   cfg.BotRealMoneyEnabled,
+	}, log)
 	if err := settings.Bootstrap(ctx); err != nil {
 		return err
 	}
 
+	bots := service.NewBotService(store, digits, feed, settings, hub, service.BotLimits{
+		MinIntervalMS: cfg.BotMinIntervalMS,
+		MaxRuns:       cfg.BotMaxRuns,
+	}, log)
+	bots.OnContract(observability.RecordBotContract)
+	bots.OnPlacement(observability.RecordBotPlacement)
+	bots.OnPlacementError(observability.RecordBotPlacementError)
+	bots.OnStop(observability.RecordBotRunStopped)
+	// The kill switch's in-process half: without these the rows still update and
+	// every loop stops on its next check, with these it is immediate.
+	admin.SetBotStopper(bots)
+	admin.SetSettingsCache(settings)
+
 	go feed.Run(ctx)
 	trading.Start(ctx)
 	digits.Start(ctx)
+	// After digits.Start, whose boot sweep has already settled or voided what it
+	// could: runs left live by the previous process are ended here rather than
+	// resumed, and a contract still open folds into its (now stopped) run through
+	// the settlement transaction.
+	if err := bots.Start(ctx); err != nil {
+		return err
+	}
 	go signals.Run(ctx)
 
 	// Refresh the gauges, including the ledger drift number that says whether
@@ -117,6 +147,7 @@ func run() error {
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
 	deps.Handler.Trade = handlers.NewTradeHandler(trading)
 	deps.Handler.Digit = handlers.NewDigitHandler(digits)
+	deps.Handler.Bot = handlers.NewBotHandler(bots)
 	deps.Handler.Market = handlers.NewMarketHandler(store, feed, signals)
 	deps.Handler.WS = handlers.NewWSHandler(hub, feed, wallet, cfg.CORSOrigins, log)
 	deps.Handler.Admin = handlers.NewAdminHandler(admin, cfg)
@@ -144,5 +175,13 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+
+	// Bot runs are the one thing here that holds durable state of its own, so it
+	// is drained before the pool closes: a run that is not finalised leaves a row
+	// saying it is live, which would block that account's next run until a
+	// restart cleared it. Each loop writes its ending on a detached context,
+	// because the root one is already cancelled by now.
+	bots.Shutdown(shutdownCtx)
+
 	return srv.Shutdown(shutdownCtx)
 }

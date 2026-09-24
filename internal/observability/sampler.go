@@ -26,6 +26,13 @@ func (s *StoreSampler) DriftedAccounts(ctx context.Context) (int, error) {
 	return total, err
 }
 
+// LiveBotRuns counts runs the database believes are live. Sampled from the table
+// rather than from BotService, so a run this process has orphaned still shows up
+// — which is the case worth alerting on.
+func (s *StoreSampler) LiveBotRuns(ctx context.Context) (int, error) {
+	return s.store.BotRuns.CountLive(ctx)
+}
+
 func (s *StoreSampler) Connections() int {
 	if s.connections == nil {
 		return 0

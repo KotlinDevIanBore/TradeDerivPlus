@@ -30,6 +30,7 @@ type Deps struct {
 		Wallet  *handlers.WalletHandler
 		Trade   *handlers.TradeHandler
 		Digit   *handlers.DigitHandler
+		Bot     *handlers.BotHandler
 		Market  *handlers.MarketHandler
 		WS      *handlers.WSHandler
 		Admin   *handlers.AdminHandler
@@ -96,16 +97,37 @@ func New(d Deps) *gin.Engine {
 		protected.GET("/symbols/:code/ticks", d.Handler.Market.Ticks)
 		protected.GET("/signals", d.Handler.Market.Signals)
 
+		// Opening a position moves money, so it gets the same treatment as a
+		// deposit: its own bucket rather than the group's loose one, which reads
+		// and price polling also draw on. Closing is deliberately not here — a
+		// user getting out of a position should never meet a limiter.
+		//
+		// A digit contract settles on the next tick, so nothing legitimate places
+		// faster than about twice a second; the burst covers a few taps in a row.
+		placement := protected.Group("", middleware.RateLimit(rate.Every(500*time.Millisecond), 5))
+		placement.POST("/trades", d.Handler.Trade.Open)
+		placement.POST("/digit-contracts", d.Handler.Digit.Open)
+		// Starting a run commits to placing repeatedly, and stopping one is the
+		// way out of that, so both sit with the other money writes. Reads about
+		// runs stay in the group's loose bucket below, alongside the quote: a
+		// client polling a live run must never be throttled into blindness.
+		placement.POST("/bot/runs", d.Handler.Bot.Start)
+		placement.POST("/bot/runs/:id/stop", d.Handler.Bot.Stop)
+
 		protected.GET("/trades", d.Handler.Trade.List)
 		protected.GET("/trades/summary", d.Handler.Trade.Summary)
-		protected.POST("/trades", d.Handler.Trade.Open)
 		protected.POST("/trades/:id/close", d.Handler.Trade.Close)
 
 		protected.GET("/digit-contracts", d.Handler.Digit.List)
 		protected.GET("/digit-contracts/summary", d.Handler.Digit.Summary)
+		// Deliberately in the loose group, not the placement bucket: a quote is a
+		// read, the ticket asks for two of them on every keystroke of the stake,
+		// and throttling it would blank the payout a user is reading.
 		protected.GET("/digit-contracts/quote", d.Handler.Digit.Quote)
 		protected.GET("/digit-contracts/:id", d.Handler.Digit.Get)
-		protected.POST("/digit-contracts", d.Handler.Digit.Open)
+
+		protected.GET("/bot/runs", d.Handler.Bot.List)
+		protected.GET("/bot/runs/:id", d.Handler.Bot.Get)
 	}
 
 	// Admin console. A separate login surface, a separate token scope, and a
@@ -135,6 +157,7 @@ func New(d Deps) *gin.Engine {
 		admin.GET("/transactions", d.Handler.Admin.Transactions)
 		admin.GET("/kyc", d.Handler.Admin.KYCQueue)
 		admin.GET("/audit-log", d.Handler.Admin.AuditLog)
+		admin.GET("/bot/runs", d.Handler.Admin.BotRuns)
 
 		// Money and state changes get their own tighter bucket.
 		actions := admin.Group("", middleware.RateLimit(rate.Every(time.Second), 10))
@@ -143,6 +166,15 @@ func New(d Deps) *gin.Engine {
 		actions.POST("/accounts/:id/adjust", d.Handler.Admin.Adjust)
 		actions.POST("/kyc/:id/approve", d.Handler.Admin.ApproveKYC)
 		actions.POST("/kyc/:id/reject", d.Handler.Admin.RejectKYC)
+		// The kill switch belongs with the money actions: it stops every live run
+		// and turns the feature off, and it is audited like the rest.
+		actions.POST("/bot/kill", d.Handler.Admin.KillBots)
+		// Symmetric to the kill switch and audited the same way, because an
+		// outage the log never ends is not a log of the outage.
+		actions.POST("/bot/enable", d.Handler.Admin.EnableBots)
+		// Stopping one run reaches into one user's account, which is what every
+		// other route in this group does.
+		actions.POST("/bot/runs/:id/stop", d.Handler.Admin.StopBotRun)
 	}
 
 	// WebSockets authenticate with ?token= because a browser cannot set
