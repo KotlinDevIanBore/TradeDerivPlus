@@ -88,7 +88,56 @@ that `/api/v1/symbols` still returns the backend's 401 with Railway's edge heade
 HTML. The second is the check that matters most: it is the regression the catch-all could plausibly
 introduce, and it would present as a client-side JSON parse error rather than as a routing fault.
 
-RESULTS_PENDING
+**Results** — production, merge commit `a6b74ca`, deployed 14:04 UTC and checked immediately after:
+
+| Path | Status | Content-Type |
+|---|---|---|
+| `/` | **200** | `text/html; charset=utf-8` |
+| `/login` | **200** | `text/html; charset=utf-8` |
+| `/register` | **200** | `text/html; charset=utf-8` |
+| `/portfolio` | **200** | `text/html; charset=utf-8` |
+| `/trade` | **200** | `text/html; charset=utf-8` |
+| `/wallet` | **200** | `text/html; charset=utf-8` |
+| `/signals` | **200** | `text/html; charset=utf-8` |
+| `/profile` | **200** | `text/html; charset=utf-8` |
+| `/admin` | **200** | `text/html; charset=utf-8` |
+| `/admin/login` | **200** | `text/html; charset=utf-8` |
+| `/nonexistent-path-xyz` | **200** | `text/html; charset=utf-8` |
+
+Every path that previously returned Vercel's 404 now returns the app. The nonexistent path returns
+200 as intended: it reaches the app, and `App.tsx:83` redirects it client-side.
+
+**The document served is genuinely the app shell**, not a per-path page. `/admin/login`'s body
+carries `<div id="root">` and `src="/assets/index-D_ik21dh.js"`, and is **byte-identical** to the
+root document (`cmp` reports no difference). Status codes alone would not have shown this.
+
+**The proxy still reaches Railway** — the regression this change could plausibly have introduced:
+
+```
+GET /api/v1/symbols
+HTTP/2 401
+content-type: application/json; charset=utf-8
+x-railway-edge: lhr1
+x-railway-request-id: cAbXM35kQkKsz81JwUFZXw
+{"error":{"code":"unauthorized","message":"Sign in to continue"}}
+```
+
+JSON from the backend with Railway's edge headers, not HTML. The `/api` rule still wins, so the
+ordering holds in production and not only on paper.
+
+**Static assets are served from the filesystem, as predicted.**
+`/assets/index-D_ik21dh.js` returns `200 application/javascript`, 554,781 bytes — the real file,
+not the catch-all's HTML.
+
+**One honest side effect.** A *missing* file under `/assets/` now returns `200 text/html` instead of
+404, because the catch-all matches it. This is the standard consequence of a broad `/(.*)` SPA
+fallback and it is not what the fix broke — nothing was reachable before it. It matters only if a
+stale cached `index.html` references a bundle that no longer exists: the browser would report a MIME
+type error rather than a clean 404. Since Vite emits content-hashed filenames, real assets never
+move under a given name, so this is a diagnostic annoyance rather than a failure mode. Narrowing the
+catch-all to exclude `/assets/` would remove it, at the cost of a second rule; not done, because the
+clarity of one catch-all is worth more than a tidier console message in a case hashed filenames make
+rare.
 
 ## 5b. An unrelated CI flake seen on this branch
 
