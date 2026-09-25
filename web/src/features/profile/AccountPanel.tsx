@@ -9,9 +9,10 @@ import { useLogout } from '@/hooks/useAuth'
 import { useMe } from '@/hooks/useQueries'
 
 const kycCopy: Record<string, string> = {
-  pending: 'Verify your identity to enable withdrawals.',
+  unverified: 'Verify your identity to enable withdrawals.',
+  pending: 'Your documents are with us. Someone will review them.',
   verified: 'Your identity is verified. Withdrawals are enabled.',
-  rejected: 'We could not verify your identity. Contact support to try again.',
+  rejected: 'We could not verify your identity. You can try again.',
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -29,7 +30,7 @@ export function AccountPanel() {
   const logout = useLogout()
 
   const user = me.data
-  const kyc = user?.kyc_status ?? 'pending'
+  const kyc = user?.kyc_status ?? 'unverified'
 
   return (
     <div className="space-y-3 py-2">

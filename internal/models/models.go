@@ -11,9 +11,13 @@ import (
 // Enum-ish string constants. Kept as typed strings so handlers can validate cheaply.
 
 const (
-	KYCPending  = "pending"
-	KYCVerified = "verified"
-	KYCRejected = "rejected"
+	// KYCUnverified is the default for a new user: nothing has been submitted.
+	// Distinct from KYCPending, which now means exactly "documents are in, a
+	// person has not looked yet" rather than doubling as "never started".
+	KYCUnverified = "unverified"
+	KYCPending    = "pending"
+	KYCVerified   = "verified"
+	KYCRejected   = "rejected"
 )
 
 const (
@@ -333,10 +337,15 @@ type AuditEntry struct {
 }
 
 type KYCSubmission struct {
-	ID           uuid.UUID  `json:"id"`
-	UserID       uuid.UUID  `json:"user_id"`
-	IDNumber     string     `json:"id_number"`
-	DocumentURL  string     `json:"document_url"`
+	ID       uuid.UUID `json:"id"`
+	UserID   uuid.UUID `json:"user_id"`
+	IDNumber string    `json:"id_number"`
+	// DocumentKey is a Cloudflare R2 object key, not a URL. A reader wanting to
+	// show the document asks for a short-lived presigned URL; it is never stored.
+	// Empty once document retention has deleted the object.
+	DocumentKey  string     `json:"document_key"`
+	ContentType  string     `json:"content_type"`
+	SizeBytes    int64      `json:"size_bytes"`
 	Status       string     `json:"status"`
 	ReviewedBy   *uuid.UUID `json:"reviewed_by"`
 	ReviewReason *string    `json:"review_reason"`
@@ -346,4 +355,24 @@ type KYCSubmission struct {
 	UserPhone    string  `json:"user_phone"`
 	UserFullName *string `json:"user_full_name"`
 	ReviewerName *string `json:"reviewer_name"`
+}
+
+// KYCUploadAttempt is a presigned upload that may or may not become a
+// submission. It exists so an abandoned upload is discoverable by two parties who
+// would otherwise never learn of it: the user, who is offered "continue" instead
+// of "start", and the orphan sweep, which has an object to delete and a row to
+// find it by.
+//
+// ID is minted at presign, embedded in the object key, and becomes the
+// submission's own id at confirm — one identifier for the whole lifecycle.
+//
+// ConsumedAt is set in the same transaction that inserts the submission.
+type KYCUploadAttempt struct {
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	ObjectKey   string     `json:"object_key"`
+	ContentType string     `json:"content_type"`
+	SizeBytes   int64      `json:"size_bytes"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ConsumedAt  *time.Time `json:"consumed_at"`
 }

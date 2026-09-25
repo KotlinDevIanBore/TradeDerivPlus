@@ -18,6 +18,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
 
@@ -179,10 +180,15 @@ func seedKYC(ctx context.Context, store *repository.Store, cfg *config.Config) e
 			return err
 		}
 
+		// The id is minted here because Create no longer generates one: in the
+		// real flow it comes from the presign step, embedded in the object key.
 		if err := store.KYC.Create(ctx, &models.KYCSubmission{
+			ID:          uuid.New(),
 			UserID:      user.ID,
 			IDNumber:    fmt.Sprintf("2%07d", 1000000+i),
-			DocumentURL: placeholderDoc,
+			DocumentKey: placeholderDoc,
+			ContentType: "image/jpeg",
+			SizeBytes:   1024,
 		}); err != nil {
 			return err
 		}

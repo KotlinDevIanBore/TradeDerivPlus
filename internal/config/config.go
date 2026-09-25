@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -108,6 +109,50 @@ type Config struct {
 	MaxDepositKES       float64
 	DemoStartingBalance float64
 
+	// Object storage for KYC documents (Cloudflare R2, S3-compatible).
+	//
+	// All five may be absent: a deployment that does not take verification
+	// documents needs none of them, and the upload endpoints answer 503 rather
+	// than failing obscurely. Present-but-partial is refused at boot, the same
+	// all-or-none rule the payout block uses, because half a credential set is a
+	// misconfiguration that would otherwise surface as a failed upload.
+	R2AccountID       string
+	R2AccessKeyID     string
+	R2SecretAccessKey string
+	R2BucketName      string
+	// R2Endpoint overrides the account-derived endpoint. Normally empty.
+	R2Endpoint string
+
+	// KYC document handling.
+	//
+	// KYCMaxDocumentBytes caps a single document. Enforced twice: against the
+	// browser's declared size before a URL is signed, and against the object's
+	// actual size at confirm.
+	KYCMaxDocumentBytes int64
+	// KYCUploadURLExpiry is how long a presigned PUT stays valid. Short, because
+	// the user is at the file picker when it is issued.
+	KYCUploadURLExpiry time.Duration
+	// KYCReviewURLExpiry is how long an admin's presigned GET stays valid. Minted
+	// per click and never stored, so this wants to be short: an identity document
+	// should not sit behind a URL that outlives the person looking at it.
+	KYCReviewURLExpiry time.Duration
+	// KYCAbandonedUploadAfter is when an unconsumed upload attempt and its object
+	// become orphans to be deleted. Unrelated to document retention below: an
+	// upload nobody finished is not a record of anything.
+	KYCAbandonedUploadAfter time.Duration
+	// KYCDocumentRetentionDays is how long a REVIEWED document is kept.
+	//
+	// ZERO MEANS NEVER DELETE, and zero is the default, deliberately. The
+	// retention period for identity documents is a legal and compliance decision
+	// that engineering cannot supply — see section 1 of
+	// docs/kyc-r2-upload-plan.md. Shipping with this unset is shipping with
+	// retention visibly unconfigured, which is honest; shipping with a number
+	// somebody guessed would not be.
+	KYCDocumentRetentionDays int
+	// KYCRetentionEvery is how often the sweep runs. It does both jobs: orphan
+	// cleanup always, document retention only when the days above are non-zero.
+	KYCRetentionEvery time.Duration
+
 	// Withdrawals. Seeds withdrawals_enabled once, like the bot flags: default
 	// FALSE because a withdrawal debits the balance and waits on an M-Pesa payout
 	// that does not exist yet.
@@ -197,6 +242,20 @@ func Load() (*Config, error) {
 		MpesaB2CResultURL:       getEnv("MPESA_B2C_RESULT_URL", ""),
 		MpesaB2CTimeoutURL:      getEnv("MPESA_B2C_TIMEOUT_URL", ""),
 		MpesaB2CStatusResultURL: getEnv("MPESA_B2C_STATUS_RESULT_URL", ""),
+
+		R2AccountID:       getEnv("R2_ACCOUNT_ID", ""),
+		R2AccessKeyID:     getEnv("R2_ACCESS_KEY_ID", ""),
+		R2SecretAccessKey: getEnv("R2_SECRET_ACCESS_KEY", ""),
+		R2BucketName:      getEnv("R2_BUCKET_NAME", ""),
+		R2Endpoint:        getEnv("R2_ENDPOINT", ""),
+
+		KYCMaxDocumentBytes:     int64(getFloat("KYC_MAX_DOCUMENT_BYTES", 10<<20)),
+		KYCUploadURLExpiry:      getDuration("KYC_UPLOAD_URL_EXPIRY", 10*time.Minute),
+		KYCReviewURLExpiry:      getDuration("KYC_REVIEW_URL_EXPIRY", 5*time.Minute),
+		KYCAbandonedUploadAfter: getDuration("KYC_ABANDONED_UPLOAD_AFTER", 48*time.Hour),
+		// Zero: never delete. See the field's comment.
+		KYCDocumentRetentionDays: int(getFloat("KYC_DOCUMENT_RETENTION_DAYS", 0)),
+		KYCRetentionEvery:        getDuration("KYC_RETENTION_EVERY", time.Hour),
 
 		MpesaPayoutQueryEvery: getDuration("MPESA_PAYOUT_QUERY_EVERY", time.Minute),
 		MpesaPayoutGiveUp:     getDuration("MPESA_PAYOUT_GIVE_UP", 24*time.Hour),
@@ -289,6 +348,9 @@ func Load() (*Config, error) {
 			seen[url] = name
 		}
 	}
+	if err := validateKYCStorage(c); err != nil {
+		return nil, err
+	}
 	if c.MpesaPayoutQueryEvery <= 0 {
 		return nil, fmt.Errorf("MPESA_PAYOUT_QUERY_EVERY must be positive")
 	}
@@ -366,4 +428,52 @@ func getList(k, def string) []string {
 		}
 	}
 	return out
+}
+
+// validateKYCStorage checks the object-storage and document-handling
+// configuration. Split out of Load so a test can reach it with a Config literal
+// instead of staging two dozen unrelated environment variables — and so the rule
+// is stated in one place rather than inline among a dozen others.
+func validateKYCStorage(c *Config) error {
+	// R2 is validated on the same all-or-none rule as payouts, and for the same
+	// reason: a partial set is a misconfiguration, and the failure should happen
+	// at boot rather than when a customer tries to upload an ID. Absent entirely
+	// is legal — the upload endpoints answer 503 and say so.
+	r2Vars := map[string]string{
+		"R2_ACCOUNT_ID":        c.R2AccountID,
+		"R2_ACCESS_KEY_ID":     c.R2AccessKeyID,
+		"R2_SECRET_ACCESS_KEY": c.R2SecretAccessKey,
+		"R2_BUCKET_NAME":       c.R2BucketName,
+	}
+	r2Any, r2Missing := false, []string{}
+	for name, v := range r2Vars {
+		if v != "" {
+			r2Any = true
+		} else {
+			r2Missing = append(r2Missing, name)
+		}
+	}
+	if r2Any && len(r2Missing) > 0 {
+		sort.Strings(r2Missing)
+		return fmt.Errorf("object storage needs all of R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, "+
+			"R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME, or none of them; missing: %s",
+			strings.Join(r2Missing, ", "))
+	}
+	if c.KYCMaxDocumentBytes <= 0 {
+		return fmt.Errorf("KYC_MAX_DOCUMENT_BYTES must be positive")
+	}
+	if c.KYCUploadURLExpiry <= 0 || c.KYCReviewURLExpiry <= 0 {
+		return fmt.Errorf("KYC_UPLOAD_URL_EXPIRY and KYC_REVIEW_URL_EXPIRY must be positive")
+	}
+	if c.KYCAbandonedUploadAfter <= 0 {
+		return fmt.Errorf("KYC_ABANDONED_UPLOAD_AFTER must be positive")
+	}
+	if c.KYCRetentionEvery <= 0 {
+		return fmt.Errorf("KYC_RETENTION_EVERY must be positive")
+	}
+	// Negative is a typo, not a policy. Zero is the documented "never delete".
+	if c.KYCDocumentRetentionDays < 0 {
+		return fmt.Errorf("KYC_DOCUMENT_RETENTION_DAYS cannot be negative (0 means never delete)")
+	}
+	return nil
 }

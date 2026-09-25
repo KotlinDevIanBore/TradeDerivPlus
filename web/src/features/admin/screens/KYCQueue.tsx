@@ -73,23 +73,16 @@ export function AdminKYCQueue() {
       key: 'document',
       header: 'Document',
       render: (k) =>
-        // The upload flow does not exist this round, so the seeded value is
-        // rendered as the placeholder it is rather than as a clickable link
-        // somebody would expect to open a file.
-        k.document_url?.startsWith('http') ? (
-          <a
-            href={k.document_url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-accent hover:underline"
-          >
-            View
-          </a>
-        ) : (
-          <span className="italic text-faint" title="No upload flow yet">
-            {k.document_url || 'None'}
+        // A key is not a URL and must never be rendered as a link. Viewing is a
+        // separate request that mints a short-lived signed URL and audits the
+        // view; that control arrives with the upload flow. Until then the key is
+        // shown as the opaque string it is.
+        k.document_key ? (
+          <span className="font-mono text-meta text-muted" title={k.document_key}>
+            {k.document_key.length > 24 ? `${k.document_key.slice(0, 24)}…` : k.document_key}
           </span>
+        ) : (
+          <span className="italic text-faint">None</span>
         ),
     },
     { key: 'status', header: 'Status', render: (k) => <KYCBadge status={k.status} /> },

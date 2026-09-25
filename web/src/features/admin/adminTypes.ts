@@ -81,7 +81,10 @@ export interface KYCSubmission {
   id: string
   user_id: string
   id_number: string
-  document_url: string
+  /** An R2 object key, not a URL. Ask the API for a short-lived signed URL to view it. */
+  document_key: string
+  content_type: string
+  size_bytes: number
   status: 'pending' | 'approved' | 'rejected'
   reviewed_by: string | null
   review_reason: string | null
