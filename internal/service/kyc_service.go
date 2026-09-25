@@ -179,6 +179,169 @@ func (s *KYCService) PresignUpload(ctx context.Context, userID uuid.UUID, declar
 	}, nil
 }
 
+// Submit confirms that a document was uploaded and turns the attempt into a
+// submission for review.
+//
+// Everything the browser said at presign time is re-checked here against what is
+// actually in the bucket, because the browser is not a trustworthy narrator of
+// its own upload. In order:
+//
+//  1. the attempt must exist, belong to this caller, and be unconsumed;
+//  2. no submission may already be under review;
+//  3. the object must be there at all;
+//  4. its ACTUAL size and content type must be within the cap and on the
+//     allowlist — not the declared ones;
+//  5. its first bytes must actually be that type.
+//
+// Only then is a row written, and the row, the attempt's consumption and the
+// user's status all move in one transaction.
+func (s *KYCService) Submit(ctx context.Context, userID, attemptID uuid.UUID, idNumber string) (*models.KYCSubmission, error) {
+	if s.docs == nil {
+		return nil, ErrKYCStorageUnavailable
+	}
+	idNumber = strings.TrimSpace(idNumber)
+	if idNumber == "" {
+		return nil, invalid("id_number", "Enter your ID number")
+	}
+	if len(idNumber) > 30 {
+		return nil, invalid("id_number", "That ID number is too long")
+	}
+
+	attempt, err := s.store.KYC.GetAttempt(ctx, attemptID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrKYCUploadNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Someone else's attempt is not found rather than forbidden: the caller has no
+	// business knowing whether that id exists.
+	if attempt.UserID != userID {
+		return nil, ErrKYCUploadNotFound
+	}
+	// An already-consumed attempt makes a replayed confirm a no-op rather than a
+	// second submission.
+	if attempt.ConsumedAt != nil {
+		return nil, ErrKYCUploadNotFound
+	}
+
+	pending, err := s.store.KYC.PendingForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if pending {
+		return nil, ErrKYCReviewPending
+	}
+
+	meta, err := s.docs.Head(ctx, attempt.ObjectKey)
+	if err != nil {
+		return nil, err
+	}
+	// Absent means the upload never landed — the URL expired, the tab closed, the
+	// network dropped. Not an error on our side, and the attempt stays open so the
+	// user is offered "continue".
+	if meta == nil {
+		return nil, ErrKYCDocumentMissing
+	}
+	if meta.Size <= 0 {
+		return nil, s.rejectStoredDocument(ctx, attempt, ErrKYCDocumentMissing)
+	}
+	// The cap again, against the real size. The signature makes this hard to
+	// violate, but "hard" is not "checked": a store that ignored the signed length
+	// must not be the only thing standing between us and an unbounded document.
+	if meta.Size > s.cfg.KYCMaxDocumentBytes {
+		return nil, s.rejectStoredDocument(ctx, attempt, invalid("size_bytes",
+			fmt.Sprintf("Documents must be under %d MB", s.cfg.KYCMaxDocumentBytes>>20)))
+	}
+	stored := normaliseContentType(meta.ContentType)
+	if _, ok := allowedDocumentTypes[stored]; !ok {
+		return nil, s.rejectStoredDocument(ctx, attempt, ErrKYCDocumentRejected)
+	}
+
+	// The sniff. A label is a claim; the bytes are the fact. This is the check the
+	// codebase this was modelled on does not do, and the reason an HTML file named
+	// .jpg cannot become an identity document here.
+	head, err := s.docs.ReadHead(ctx, attempt.ObjectKey, sniffBytes)
+	if err != nil {
+		return nil, err
+	}
+	if sniffContentType(head) != stored {
+		s.log.Warn("kyc document content does not match its type",
+			"user", userID, "attempt", attemptID, "declared", stored, "sniffed", sniffContentType(head))
+		return nil, s.rejectStoredDocument(ctx, attempt, ErrKYCDocumentRejected)
+	}
+
+	submission := &models.KYCSubmission{
+		// The attempt's id becomes the submission's, so one identifier covers the
+		// whole lifecycle and the object key names the row it belongs to.
+		ID:          attempt.ID,
+		UserID:      userID,
+		IDNumber:    idNumber,
+		DocumentKey: attempt.ObjectKey,
+		ContentType: stored,
+		SizeBytes:   meta.Size,
+	}
+
+	err = s.store.WithTx(ctx, func(st *repository.Store) error {
+		// Guarded, and the guard decides the transaction: two confirms racing for
+		// one attempt must not both produce a submission.
+		won, err := st.KYC.ConsumeAttempt(ctx, attempt.ID)
+		if err != nil {
+			return err
+		}
+		if !won {
+			return ErrKYCUploadNotFound
+		}
+		if err := st.KYC.Create(ctx, submission); err != nil {
+			return err
+		}
+		// In the same transaction as the insert, so a user can never read as
+		// pending with nothing for an operator to review, or hold a submission
+		// their status does not reflect.
+		return st.Users.SetKYCStatus(ctx, userID, models.KYCPending)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	s.log.Info("kyc submitted", "user", userID, "submission", submission.ID,
+		"content_type", stored, "bytes", meta.Size)
+	return submission, nil
+}
+
+// rejectStoredDocument deletes an object that will never become a submission and
+// returns the caller's error unchanged.
+//
+// The attempt is deliberately left open: the user did try, and offering them
+// "continue" is better than resetting to "start" as though nothing had happened.
+// Deletion is best-effort — a failure here is logged, not surfaced, because the
+// user's problem is the document, not our housekeeping, and the orphan sweep will
+// come back for it.
+func (s *KYCService) rejectStoredDocument(ctx context.Context, attempt *models.KYCUploadAttempt, cause error) error {
+	if err := s.docs.Delete(ctx, attempt.ObjectKey); err != nil {
+		s.log.Error("kyc: could not delete a rejected document",
+			"attempt", attempt.ID, "key", attempt.ObjectKey, "err", err)
+	}
+	return cause
+}
+
+// DocumentURL mints a short-lived URL for one submission's document.
+//
+// Called only by the admin path, which audits the view before returning it.
+func (s *KYCService) DocumentURL(ctx context.Context, submission *models.KYCSubmission) (string, error) {
+	if s.docs == nil {
+		return "", ErrKYCStorageUnavailable
+	}
+	if submission.DocumentKey == "" {
+		// Retention has deleted it, or it never existed. Either way there is
+		// nothing to show, and saying so beats a URL that 404s.
+		return "", ErrKYCDocumentMissing
+	}
+	// inline: a reviewer looks at the document in the browser rather than
+	// accumulating identity documents in a downloads folder.
+	return s.docs.PresignGet(ctx, submission.DocumentKey, "inline", s.cfg.KYCReviewURLExpiry)
+}
+
 // State reports where a user stands, including whether an upload was started and
 // never finished.
 func (s *KYCService) State(ctx context.Context, userID uuid.UUID) (*VerificationState, error) {

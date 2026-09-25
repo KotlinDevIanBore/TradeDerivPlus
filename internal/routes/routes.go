@@ -112,6 +112,7 @@ func New(d Deps) *gin.Engine {
 		kyc := protected.Group("", middleware.RateLimit(rate.Every(time.Second), 10))
 		kyc.GET("/kyc/state", d.Handler.KYC.State)
 		kyc.POST("/kyc/upload-url", d.Handler.KYC.UploadURL)
+		kyc.POST("/kyc/submit", d.Handler.KYC.Submit)
 
 		// Money movement gets its own tighter bucket on top of the group's.
 		money := protected.Group("", middleware.RateLimit(rate.Every(2*time.Second), 5))
@@ -190,6 +191,9 @@ func New(d Deps) *gin.Engine {
 		actions.POST("/accounts/:id/freeze", d.Handler.Admin.Freeze)
 		actions.POST("/accounts/:id/unfreeze", d.Handler.Admin.Unfreeze)
 		actions.POST("/accounts/:id/adjust", d.Handler.Admin.Adjust)
+		// Signing a URL for an identity document writes an audit row, so it is a
+		// POST among the audited actions rather than a GET among the reads.
+		actions.POST("/kyc/:id/document-url", d.Handler.Admin.KYCDocumentURL)
 		actions.POST("/kyc/:id/approve", d.Handler.Admin.ApproveKYC)
 		actions.POST("/kyc/:id/reject", d.Handler.Admin.RejectKYC)
 		// Settles a stuck deposit's original row, so a late callback credits

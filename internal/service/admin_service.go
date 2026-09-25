@@ -52,7 +52,24 @@ type AdminService struct {
 	// settle the original row. Nil until main wires it; ResolveDeposit refuses
 	// rather than settle by any other route.
 	deposits depositResolver
+
+	// documents is the KYC service, through the one method the console needs.
+	// Nil until main wires it, and KYCDocumentURL then refuses rather than
+	// reaching into the object store itself: the service that owns the documents
+	// decides how they are exposed.
+	documents documentURLSigner
 }
+
+// documentURLSigner is what KYCDocumentURL needs from KYCService.
+type documentURLSigner interface {
+	DocumentURL(ctx context.Context, submission *models.KYCSubmission) (string, error)
+}
+
+// SetDocuments wires the KYC service in. A setter rather than a constructor
+// argument for the same reason the payout and deposit resolvers use one: the
+// dependency runs both ways, and changing the constructor's signature would
+// ripple through every call site for no benefit.
+func (s *AdminService) SetDocuments(d documentURLSigner) { s.documents = d }
 
 // depositResolver is what ResolveDeposit needs from MpesaService. The console
 // never writes a deposit outcome itself — it asks the service that owns the
@@ -644,6 +661,54 @@ func (s *AdminService) Adjust(ctx context.Context, in AdjustInput) (*models.Tran
 	})
 	s.log.Info("balance adjusted", "account", in.AccountID, "amount", in.Amount.String(), "admin", in.AdminID)
 	return tx, wallet, nil
+}
+
+// KYCDocumentURL mints a short-lived URL for a submission's document and records
+// that it was viewed.
+//
+// Ordering is deliberate and is the whole design of this method. The URL is signed
+// first, which has no side effect; the audit row is then written in a transaction;
+// and the URL is returned only if that commit succeeded. So no document URL is
+// ever handed out without a record of it.
+//
+// The reverse order fails in one of two ways: audit-then-presign records views
+// that never happened when signing fails, and presign-then-return-then-audit
+// hands out a URL that may never be recorded at all. Neither is acceptable for
+// this particular data.
+func (s *AdminService) KYCDocumentURL(ctx context.Context, adminID, submissionID uuid.UUID) (string, error) {
+	if s.documents == nil {
+		return "", ErrKYCStorageUnavailable
+	}
+	submission, err := s.store.KYC.GetByID(ctx, submissionID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+
+	url, err := s.documents.DocumentURL(ctx, submission)
+	if err != nil {
+		return "", err
+	}
+
+	err = s.store.WithTx(ctx, func(st *repository.Store) error {
+		return s.audit(ctx, st, adminID, models.ActionKYCDocumentView, models.TargetUser,
+			submission.UserID, "", map[string]any{
+				"submission_id": submissionID.String(),
+				// Not the key itself: the audit log is read in the console, and a
+				// key is a pointer to the document rather than information about
+				// the decision.
+				"content_type": submission.ContentType,
+			})
+	})
+	if err != nil {
+		return "", err
+	}
+
+	s.fired(models.ActionKYCDocumentView)
+	s.log.Info("kyc document viewed", "admin", adminID, "submission", submissionID)
+	return url, nil
 }
 
 // ReviewKYC approves or rejects a submission and moves the user's status in

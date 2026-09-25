@@ -142,6 +142,9 @@ func run() error {
 		log.Warn("object storage not configured: KYC documents use an in-memory stub and do not persist")
 	}
 	kyc := service.NewKYCService(store, docs, cfg, log)
+	// The console asks the KYC service for a document URL rather than reaching into
+	// the object store itself, so one place decides how documents are exposed.
+	admin.SetDocuments(kyc)
 
 	settings := service.NewSettingsService(store, service.SettingsDefaults{
 		DigitContractsEnabled: cfg.DigitContractsEnabled,

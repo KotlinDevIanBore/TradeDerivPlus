@@ -275,6 +275,11 @@ const (
 	ActionAdjustment = "manual_adjustment"
 	ActionKYCApprove = "kyc_approve"
 	ActionKYCReject  = "kyc_reject"
+	// ActionKYCDocumentView records that an operator looked at someone's identity
+	// document. Viewing is not a change, but it is access to the most sensitive
+	// data this system holds, and an approval trail that cannot say who looked is
+	// only half a trail.
+	ActionKYCDocumentView = "kyc_document_view"
 	// ActionBotKill is the automated-trading kill switch: it stops every live run
 	// and turns the feature off, so it is the most consequential single button in
 	// the console and is audited like any other money action.

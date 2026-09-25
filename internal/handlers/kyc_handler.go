@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
@@ -47,6 +48,34 @@ func (h *KYCHandler) UploadURL(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, target)
+}
+
+type submitRequest struct {
+	AttemptID string `json:"attempt_id"`
+	IDNumber  string `json:"id_number"`
+}
+
+// Submit says the document is in the bucket. Everything the client claimed at
+// presign time is re-checked here against what is actually stored, including a
+// content sniff, so a label cannot stand in for the bytes.
+func (h *KYCHandler) Submit(c *gin.Context) {
+	var req submitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, "Tell us which upload to confirm", "")
+		return
+	}
+	attemptID, err := uuid.Parse(req.AttemptID)
+	if err != nil {
+		badRequest(c, "Invalid upload id", "attempt_id")
+		return
+	}
+
+	submission, err := h.kyc.Submit(c.Request.Context(), middleware.UserID(c), attemptID, req.IDNumber)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, submission)
 }
 
 // State reports where the caller stands, including whether an upload was started

@@ -259,6 +259,9 @@ func newHarness(t *testing.T) *harness {
 
 	docs := storage.NewStub()
 	kyc := service.NewKYCService(store, docs, cfg, log)
+	// Wired the way main.go wires it: the console asks the KYC service for a
+	// document URL rather than reaching into the store itself.
+	admin.SetDocuments(kyc)
 
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
