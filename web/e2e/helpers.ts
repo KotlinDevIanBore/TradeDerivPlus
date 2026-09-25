@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 export const API = process.env.VITE_API_URL ?? 'http://localhost:8080/api/v1'
 
@@ -211,6 +211,124 @@ export async function requireMockMpesa() {
         'USE_MOCK_MPESA=true, which is what both CI e2e jobs do.',
     )
   }
+}
+
+/**
+ * Skips a payout test when withdrawals are off, which is their default.
+ *
+ * A skip rather than a failure, unlike requireMockMpesa: mock mode is a safety
+ * property and running without it would send real money, but withdrawals being off
+ * is the intended state of a deployment that has no B2C credentials. A test that
+ * needs them on says so and steps aside.
+ */
+export async function requireWithdrawals() {
+  const fixture = await registerViaApi(newPhone())
+  const res = await api('/auth/me', { token: fixture.access_token })
+  const me = (await res.json()) as { withdrawals_enabled?: boolean }
+  test.skip(
+    me.withdrawals_enabled !== true,
+    'withdrawals are off for this API; start it with WITHDRAWALS_ENABLED=true on a fresh ' +
+      'database, or flip app_settings.withdrawals_enabled',
+  )
+}
+
+/**
+ * A verified user with a funded real account, which is what a withdrawal needs.
+ *
+ * It has to come from a seeded KYC submission, because there is no user-facing
+ * verification endpoint at all — a freshly registered user cannot become verified
+ * through the API by any route, which is the same gap the withdraw sheet's
+ * "Verification is not available yet" admits to. So this approves a pending
+ * submission through the console, exactly as the KYC test does, and steps aside
+ * when the queue is empty.
+ */
+export async function verifiedFundedUser(usd: string) {
+  const token = await adminToken()
+
+  const queue = await api('/admin/kyc?status=pending&limit=1', { token })
+  const page = (await queue.json()) as {
+    items: Array<{ id: string; user_id: string; user_phone: string }>
+  }
+  const submission = page.items?.[0]
+  test.skip(
+    !submission,
+    'no pending KYC submissions to approve, and there is no other way to verify a user ' +
+      'through the API; run: go run ./cmd/seed',
+  )
+
+  const approved = await api(`/admin/kyc/${submission.id}/approve`, { method: 'POST', token, body: {} })
+  if (!approved.ok) {
+    throw new Error(`could not approve KYC (${approved.status}): ${await approved.text()}`)
+  }
+
+  // The seeded fixtures share one password and already have a real account.
+  const login = await api('/auth/login', {
+    method: 'POST',
+    body: { phone_number: submission.user_phone, password: PASSWORD },
+  })
+  if (!login.ok) {
+    throw new Error(`could not sign in as the verified fixture (${login.status}): ${await login.text()}`)
+  }
+  const session = (await login.json()) as { access_token: string }
+
+  const accounts = await api('/accounts', { token: session.access_token })
+  const list = (await accounts.json()) as {
+    items: Array<{ id: string; account_type: string; account_number: string }>
+  }
+  const real = list.items?.find((a) => a.account_type === 'real')
+  if (!real) {
+    throw new Error('the verified fixture has no real account')
+  }
+
+  // Funded through the console's own adjust action, so nothing writes behind the
+  // API's back.
+  const funded = await api(`/admin/accounts/${real.id}/adjust`, {
+    method: 'POST',
+    token,
+    body: { amount: usd, balance_type: 'real', reason: 'Seeding a balance for an end-to-end test' },
+  })
+  if (!funded.ok) {
+    throw new Error(`could not seed a balance (${funded.status}): ${await funded.text()}`)
+  }
+
+  return {
+    accessToken: session.access_token,
+    userId: submission.user_id,
+    accountId: real.id,
+    accountNumber: real.account_number,
+  }
+}
+
+/** The real balance of a fixture's account, as a number. */
+export async function realBalance(user: { accessToken: string; accountId: string }) {
+  const res = await api(`/accounts/${user.accountId}/wallet`, { token: user.accessToken })
+  const wallet = (await res.json()) as { real_balance: string }
+  return Number(wallet.real_balance)
+}
+
+/** The M-Pesa request id a withdrawal's payout is tracked by. */
+export async function originatorFor(transactionId: string) {
+  const token = await adminToken()
+  const res = await api('/admin/payouts?filter=all&limit=100', { token })
+  const page = (await res.json()) as {
+    items: Array<{ transaction_id: string; originator_conversation_id: string }>
+  }
+  const row = page.items.find((p) => p.transaction_id === transactionId)
+  if (!row) {
+    throw new Error(`no payout row for transaction ${transactionId}`)
+  }
+  return row.originator_conversation_id
+}
+
+/** An admin access token, for setup a test needs but is not testing. */
+async function adminToken() {
+  for (const password of ADMIN_PASSWORDS) {
+    const res = await api('/admin/login', { method: 'POST', body: { username: 'admin', password } })
+    if (res.ok) {
+      return ((await res.json()) as { access_token: string }).access_token
+    }
+  }
+  throw new Error('no known admin password works; reset it with: go run ./cmd/seed -reset-admin')
 }
 
 /** Registers through the UI, which is also how the signup path gets covered. */

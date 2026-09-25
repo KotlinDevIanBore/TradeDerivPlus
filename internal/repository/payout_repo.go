@@ -260,6 +260,79 @@ func (r *PayoutRepo) ListOpen(ctx context.Context, limit int) ([]models.MpesaPay
 	return out, rows.Err()
 }
 
+// AdminPayout is a payout with the account and user attached, plus the two things
+// an operator needs that are not on the row itself: the withdrawal's own ledger
+// status, and whether anything is still looking at it.
+type AdminPayout struct {
+	models.MpesaPayout
+	AccountNumber string `json:"account_number"`
+	AccountType   string `json:"account_type"`
+	UserID        string `json:"user_id"`
+	UserPhone     string `json:"user_phone"`
+	LedgerStatus  string `json:"ledger_status"`
+	// GivenUp is an open payout with no schedule: the pass has stopped asking and
+	// this is a person's now.
+	GivenUp bool `json:"given_up"`
+}
+
+// ListForAdmin backs the console's payout view.
+//
+// filter is "open" (anything undecided), "unknown" (the ones worth alerting on),
+// "given_up" (open and nothing is looking), "settled", or "" for everything.
+// Ordered oldest first within the open filters, because the oldest unanswered
+// payout is the one a customer has been waiting on longest.
+func (r *PayoutRepo) ListForAdmin(ctx context.Context, filter string, limit, offset int) ([]AdminPayout, int, error) {
+	where := ""
+	switch filter {
+	case "open":
+		where = ` WHERE p.status IN ('pending', 'sent', 'unknown')`
+	case "unknown":
+		where = ` WHERE p.status = 'unknown'`
+	case "given_up":
+		where = ` WHERE p.status IN ('pending', 'sent', 'unknown') AND p.next_query_at IS NULL`
+	case "settled":
+		where = ` WHERE p.status IN ('completed', 'failed', 'never_received')`
+	}
+
+	const from = `
+		FROM mpesa_payouts p
+		JOIN transactions t ON t.id = p.transaction_id
+		JOIN accounts a ON a.id = t.account_id
+		JOIN users u ON u.id = a.user_id`
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT count(*)`+from+where).Scan(&total); err != nil {
+		return nil, 0, mapErr(err)
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT p.id, p.transaction_id, p.originator_conversation_id, p.conversation_id,
+		       p.phone_number, p.amount, p.status, p.requested_at, p.result_code, p.result_desc,
+		       p.receipt, p.settled_by, p.reconcile_attempts, p.next_query_at, p.created_at, p.updated_at,
+		       a.account_number, a.account_type, a.user_id, u.phone_number, t.status,
+		       (p.status IN ('pending','sent','unknown') AND p.next_query_at IS NULL) AS given_up`+
+		from+where+`
+		ORDER BY p.created_at ASC
+		LIMIT $1 OFFSET $2`, limit, offset)
+	if err != nil {
+		return nil, 0, mapErr(err)
+	}
+	defer rows.Close()
+
+	out := []AdminPayout{}
+	for rows.Next() {
+		var p AdminPayout
+		if err := rows.Scan(&p.ID, &p.TransactionID, &p.OriginatorConversationID, &p.ConversationID,
+			&p.PhoneNumber, &p.Amount, &p.Status, &p.RequestedAt, &p.ResultCode, &p.ResultDesc,
+			&p.Receipt, &p.SettledBy, &p.ReconcileAttempts, &p.NextQueryAt, &p.CreatedAt, &p.UpdatedAt,
+			&p.AccountNumber, &p.AccountType, &p.UserID, &p.UserPhone, &p.LedgerStatus, &p.GivenUp); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, p)
+	}
+	return out, total, rows.Err()
+}
+
 // CountByStatus feeds the gauges. 'unknown' rising is the one an operator owes
 // attention to: each is a customer debited with no answer either way.
 func (r *PayoutRepo) CountByStatus(ctx context.Context) (map[string]int, error) {

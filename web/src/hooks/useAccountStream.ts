@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from '@/components/ui/Toast'
 import { createSocket } from '@/lib/socket'
 import { useSessionStore } from '@/store/session'
 import { dec } from '@/lib/money'
@@ -97,11 +98,32 @@ export function useAccountStream(
           case 'transaction': {
             // The payload names its account, which may not be the one on
             // screen, so invalidate by that rather than by the active account.
-            const tx = event.payload as { account_id?: string }
+            const tx = event.payload as {
+              account_id?: string
+              type?: string
+              status?: string
+              reason?: string
+            }
             if (tx.account_id) {
               queryClient.invalidateQueries({ queryKey: queryKeys.transactions(tx.account_id) })
             } else if (accountId) {
               queryClient.invalidateQueries({ queryKey: queryKeys.transactions(accountId) })
+            }
+
+            // A withdrawal is the one transaction whose outcome arrives with no
+            // screen open to receive it: the sheet closes as soon as the request
+            // is sent, and its copy promises we will say when M-Pesa confirms.
+            // This is what makes that true. Deposits have their own sheet, which
+            // is watching, so they are left alone here rather than toasted twice.
+            if (tx.type === 'withdrawal' && tx.status && tx.status !== 'pending') {
+              if (tx.status === 'completed') {
+                toast.success('Withdrawal sent', 'M-Pesa has confirmed the payment.')
+              } else {
+                toast.error(
+                  "Withdrawal didn't go through",
+                  tx.reason || 'The money is back in your balance.',
+                )
+              }
             }
             break
           }

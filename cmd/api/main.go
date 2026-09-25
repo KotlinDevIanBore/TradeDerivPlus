@@ -142,6 +142,7 @@ func run() error {
 	// The console settles a stuck deposit through the M-Pesa service, never on
 	// its own: same guards, same lock order as a callback.
 	admin.SetDepositResolver(mpesa)
+	admin.SetPayoutResolver(payouts)
 	// Withdrawals read their flag through the settings cache. Without this the
 	// wallet refuses every withdrawal, which is the safe direction.
 	wallet.SetWithdrawalFlags(settings)

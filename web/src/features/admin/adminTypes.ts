@@ -1,13 +1,4 @@
-import type {
-  Account,
-  AccountType,
-  BotRun,
-  KYCStatus,
-  Transaction,
-  Trade,
-  User,
-  Wallet,
-} from '@/types'
+import type { Account, AccountType, BotRun, KYCStatus, Trade, Transaction, TxStatus, User, Wallet } from '@/types'
 
 export type AdminRole = 'admin' | 'support' | 'restricted'
 
@@ -101,6 +92,37 @@ export interface KYCSubmission {
   reviewer_name: string | null
 }
 
+/**
+ * A payout as the console sees it. `status` is the payout's own lifecycle;
+ * `ledger_status` is the withdrawal's. They differ while a payout is in flight,
+ * which is the whole reason this screen exists.
+ */
+export interface AdminPayout {
+  id: string
+  transaction_id: string
+  originator_conversation_id: string
+  conversation_id: string | null
+  phone_number: string
+  amount: string
+  status: 'pending' | 'sent' | 'unknown' | 'never_received' | 'completed' | 'failed'
+  requested_at: string | null
+  result_code: string | null
+  result_desc: string | null
+  receipt: string | null
+  settled_by: string | null
+  reconcile_attempts: number
+  next_query_at: string | null
+  created_at: string
+  updated_at: string
+  account_number: string
+  account_type: AccountType
+  user_id: string
+  user_phone: string
+  ledger_status: TxStatus
+  /** Open, and nothing is looking at it any more. */
+  given_up: boolean
+}
+
 export type AuditAction =
   | 'freeze_account'
   | 'unfreeze_account'
@@ -111,6 +133,7 @@ export type AuditAction =
   | 'bot_enable'
   | 'bot_run_stop'
   | 'deposit_resolve'
+  | 'payout_resolve'
 
 /**
  * A run as the console sees it: the run row plus whose it is. The user app's

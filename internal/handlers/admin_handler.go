@@ -351,6 +351,50 @@ func (h *AdminHandler) ResolveDeposit(c *gin.Context) {
 	c.JSON(http.StatusOK, tx)
 }
 
+// GET /admin/payouts?filter=open|unknown|given_up|settled
+//
+// The operator's view of withdrawals whose payout has not resolved. 'unknown' is
+// the one worth watching: each row is a customer whose balance was debited and
+// about whom M-Pesa has said nothing either way.
+func (h *AdminHandler) Payouts(c *gin.Context) {
+	limit := clampInt(c.Query("limit"), 25, 1, 100)
+	page, offset := resolvePage(c, limit)
+
+	result, err := h.admin.Payouts(c.Request.Context(), c.Query("filter"), limit, offset)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	result.Page, result.Pages = page, pageCount(result.Total, limit)
+	c.JSON(http.StatusOK, result)
+}
+
+// POST /admin/payouts/:id/resolve  {outcome: paid|failed|never_received, reason}
+//
+// :id is the WITHDRAWAL's transaction id, matching the deposit resolve route, so
+// an operator working from the transactions list uses the same identifier for
+// both directions.
+func (h *AdminHandler) ResolvePayout(c *gin.Context) {
+	txID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		badRequest(c, "A valid transaction id is required", "")
+		return
+	}
+
+	var req struct {
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	tx, err := h.admin.ResolvePayout(c.Request.Context(), middleware.AdminID(c), txID, req.Outcome, req.Reason)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, tx)
+}
+
 // --- Automated trading -----------------------------------------------------
 
 // POST /admin/bot/enable

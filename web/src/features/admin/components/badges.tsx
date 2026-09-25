@@ -57,6 +57,9 @@ const actionTone: Record<AuditAction, string> = {
   // Money moves, on an operator's word rather than Safaricom's. Accent, like
   // an adjustment.
   deposit_resolve: 'border-accent/40 text-accent',
+  // Money either stays out or comes back on an operator's word. Accent, like the
+  // other two.
+  payout_resolve: 'border-accent/40 text-accent',
 }
 
 const actionLabel: Record<AuditAction, string> = {
@@ -69,6 +72,7 @@ const actionLabel: Record<AuditAction, string> = {
   bot_enable: 'Turned auto runs back on',
   bot_run_stop: 'Stopped an auto run',
   deposit_resolve: 'Resolved a deposit',
+  payout_resolve: 'Resolved a payout',
 }
 
 export function ActionBadge({ action }: { action: AuditAction }) {

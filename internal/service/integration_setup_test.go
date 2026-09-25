@@ -229,6 +229,7 @@ func newHarness(t *testing.T) *harness {
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
 	admin.SetDepositResolver(mpesa)
+	admin.SetPayoutResolver(payouts)
 	// Poll fast: settlement in a test is driven by an injected tick, not by a
 	// clock, so the only thing a real poll interval would add is waiting.
 	bots.SetPollInterval(5 * time.Millisecond)

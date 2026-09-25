@@ -68,6 +68,8 @@ func fail(c *gin.Context, err error) {
 		respondErr(c, http.StatusForbidden, err.Error(), "withdrawals_disabled", "")
 	case errors.Is(err, service.ErrWithdrawalInFlight):
 		respondErr(c, http.StatusConflict, err.Error(), "withdrawal_in_flight", "")
+	case errors.Is(err, service.ErrPayoutSettled):
+		respondErr(c, http.StatusConflict, err.Error(), "payout_settled", "")
 	case errors.Is(err, service.ErrDepositSettled):
 		respondErr(c, http.StatusConflict, err.Error(), "deposit_settled", "")
 	case errors.Is(err, service.ErrTooManyOpen):

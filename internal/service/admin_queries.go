@@ -243,6 +243,28 @@ type AuditPage struct {
 	Pages  int                 `json:"pages"`
 }
 
+// PayoutPage is the console's payout list.
+type PayoutPage struct {
+	Items []repository.AdminPayout `json:"items"`
+	Total int                      `json:"total"`
+	Page  int                      `json:"page"`
+	Pages int                      `json:"pages"`
+	Limit int                      `json:"limit"`
+}
+
+// Payouts backs the operator's view of withdrawals that have not resolved. The
+// default filter is "open", because that is the only reason to open the screen.
+func (s *AdminService) Payouts(ctx context.Context, filter string, limit, offset int) (*PayoutPage, error) {
+	if filter == "" {
+		filter = "open"
+	}
+	items, total, err := s.store.Payouts.ListForAdmin(ctx, filter, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	return &PayoutPage{Items: items, Total: total, Limit: limit}, nil
+}
+
 func (s *AdminService) AuditLog(ctx context.Context, adminID *uuid.UUID, action string, limit, offset int) (*AuditPage, error) {
 	items, total, err := s.store.Audit.List(ctx, adminID, action, limit, offset)
 	if err != nil {

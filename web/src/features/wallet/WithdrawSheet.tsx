@@ -52,7 +52,12 @@ export function WithdrawSheet({
     onSuccess: (tx) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.wallet(tx.account_id) })
       queryClient.invalidateQueries({ queryKey: queryKeys.transactions(tx.account_id) })
-      toast.success('Withdrawal requested', 'It should arrive within a few minutes.')
+      // What happens, not when. The server sends the request to M-Pesa and then
+      // waits on M-Pesa's own confirmation, which is usually quick and sometimes
+      // is not; and if it does not go through, the money comes back on its own.
+      // Promising minutes was a promise nothing could keep, and the previous copy
+      // made it twice.
+      toast.success('Sent to M-Pesa', "We'll tell you as soon as M-Pesa confirms it.")
       onOpenChange(false)
     },
   })
@@ -194,7 +199,14 @@ export function WithdrawSheet({
           error={phoneError}
         />
 
-        <p className="text-meta text-faint">Arrives in 1 to 5 minutes. No fee.</p>
+        {/* No fee is a fact. How long it takes is not ours to promise: the payout
+            is confirmed by M-Pesa, on M-Pesa's own timing, and a request that
+            stalls can take hours rather than minutes. What is worth saying is
+            what happens if it fails, because that is the part a customer worries
+            about while their balance is already down. */}
+        <p className="text-meta text-faint">
+          No fee. If it doesn't go through, the money returns to your balance.
+        </p>
 
         <Button size="lg" block disabled={!canSubmit} onClick={() => setConfirming(true)}>
           Withdraw

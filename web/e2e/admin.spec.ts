@@ -1,5 +1,17 @@
 import { expect, test } from '@playwright/test'
-import { PASSWORD, api, loginAdmin, newPhone, registerViaApi, requireMockMpesa, startRunViaApi } from './helpers'
+import {
+  PASSWORD,
+  api,
+  loginAdmin,
+  newPhone,
+  originatorFor,
+  registerViaApi,
+  requireMockMpesa,
+  requireWithdrawals,
+  realBalance,
+  startRunViaApi,
+  verifiedFundedUser,
+} from './helpers'
 
 
 test.describe('The admin console', () => {
@@ -164,6 +176,89 @@ test.describe('The admin console', () => {
     await page.getByRole('link', { name: 'Audit log' }).click()
     await expect(page.getByText('Resolved a deposit').first()).toBeVisible()
     await expect(page.getByText(/receipt confirmed on the Daraja portal/).first()).toBeVisible()
+  })
+
+  test('resolves a stuck payout and a late result credits nothing', async ({ page }) => {
+    await requireMockMpesa()
+    await requireWithdrawals()
+    // Verified and funded, which a withdrawal needs and neither of which is what
+    // this test is about.
+    const user = await verifiedFundedUser('200')
+
+    // Relative, not absolute: a seeded fixture may already hold a balance, and
+    // what matters is that the refund puts back exactly what the withdrawal took.
+    const balanceBefore = await realBalance(user)
+
+    // The stuck number: the mock accepts the payout and never reports on it, so
+    // the withdrawal stays in flight for the console to act on.
+    const started = await api('/wallet/withdraw', {
+      method: 'POST',
+      token: user.accessToken,
+      body: { account_id: user.accountId, amount_usd: '100', phone_number: '0700000000' },
+    })
+    const startedBody = await started.text()
+    expect(started.status, startedBody).toBe(202)
+    const withdrawal = JSON.parse(startedBody) as { id: string; status: string }
+    expect(withdrawal.status).toBe('pending')
+
+    await loginAdmin(page)
+    await page.getByRole('link', { name: 'Payouts' }).click()
+    await page.waitForURL('**/admin/payouts**')
+
+    const row = page.getByRole('row').filter({ hasText: user.accountNumber })
+    await expect(row).toBeVisible({ timeout: 30_000 })
+    await row.click()
+
+    // The sheet says what the state means before offering anything, and carries
+    // the request id an operator searches the M-Pesa portal for.
+    await expect(page.getByText(/M-Pesa accepted the request and has not reported back/)).toBeVisible()
+    await expect(page.getByText(/Check this request id on the M-Pesa portal/)).toBeVisible()
+
+    await page.getByRole('button', { name: 'M-Pesa has no record of it' }).click()
+    // The consequence names the thing that makes refunding risky.
+    await expect(page.getByText(/cannot be\s+reversed/)).toBeVisible()
+    const confirm = page.getByRole('button', { name: 'Refund the customer' })
+    await expect(confirm).toBeDisabled()
+    await page
+      .getByLabel(/Reason/)
+      .fill('No record of this request id on the Daraja portal after checking twice')
+    await confirm.click()
+
+    await expect(page.getByRole('status').getByText('Refunded to the customer')).toBeVisible()
+
+    // The balance is back, once.
+    expect(await realBalance(user)).toBe(balanceBefore)
+
+    // The late result: M-Pesa finally says it paid. The API acknowledges it, as it
+    // must, and nothing moves — the customer must not end up with both.
+    const replay = await api('/mpesa/b2c/result', {
+      method: 'POST',
+      body: {
+        Result: {
+          ResultType: 0,
+          ResultCode: '0',
+          ResultDesc: 'The service request is processed successfully.',
+          OriginatorConversationID: await originatorFor(withdrawal.id),
+          ConversationID: 'AG_LATE',
+          TransactionID: 'NALATE001',
+          ResultParameters: { ResultParameter: [{ Key: 'TransactionReceipt', Value: 'NALATE001' }] },
+        },
+      },
+    })
+    expect(replay.status).toBe(200)
+
+    expect(await realBalance(user)).toBe(balanceBefore)
+
+    const tx = await api(`/wallet/transactions/${withdrawal.id}`, { token: user.accessToken })
+    const settled = (await tx.json()) as { status: string; metadata: Record<string, unknown> }
+    expect(settled.status).toBe('failed')
+    expect(settled.metadata.settled_by).toBe('admin')
+
+    // On the record, under its own action.
+    await page.keyboard.press('Escape')
+    await page.getByRole('link', { name: 'Audit log' }).click()
+    await expect(page.getByText('Resolved a payout').first()).toBeVisible()
+    await expect(page.getByText(/No record of this request id/).first()).toBeVisible()
   })
 
   test('refuses a user token on an admin route', async ({ page }) => {

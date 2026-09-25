@@ -38,6 +38,7 @@ var (
 	// Withdrawals. Disabled is a platform state, in flight is this account's.
 	ErrWithdrawalsDisabled = errors.New("Withdrawals are not available yet")
 	ErrWithdrawalInFlight  = errors.New("A withdrawal is already on its way. Wait for it to finish before starting another")
+	ErrPayoutSettled       = errors.New("This payout has already been settled")
 
 	// Automated runs.
 	ErrBotDisabled          = errors.New("Automated trading is not available on your account yet")

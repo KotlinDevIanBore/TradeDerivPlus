@@ -287,6 +287,10 @@ const (
 	// original ledger row, through the same path a callback takes, so a late
 	// callback afterwards credits nothing.
 	ActionDepositResolve = "deposit_resolve"
+	// ActionPayoutResolve settles a stuck withdrawal's payout from the console —
+	// the original row, through the same settle every other path uses, so a
+	// result arriving afterwards credits or refunds nothing.
+	ActionPayoutResolve = "payout_resolve"
 )
 
 const (

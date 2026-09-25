@@ -171,6 +171,7 @@ func New(d Deps) *gin.Engine {
 		admin.GET("/users", d.Handler.Admin.Users)
 		admin.GET("/users/:id", d.Handler.Admin.UserDetail)
 		admin.GET("/transactions", d.Handler.Admin.Transactions)
+		admin.GET("/payouts", d.Handler.Admin.Payouts)
 		admin.GET("/kyc", d.Handler.Admin.KYCQueue)
 		admin.GET("/audit-log", d.Handler.Admin.AuditLog)
 		admin.GET("/bot/runs", d.Handler.Admin.BotRuns)
@@ -185,6 +186,9 @@ func New(d Deps) *gin.Engine {
 		// Settles a stuck deposit's original row, so a late callback credits
 		// nothing. With the money actions because it is one.
 		actions.POST("/deposits/:id/resolve", d.Handler.Admin.ResolveDeposit)
+		// Settles a stuck withdrawal's payout. With the money actions because it
+		// is one: two of its three outcomes return the customer's balance.
+		actions.POST("/payouts/:id/resolve", d.Handler.Admin.ResolvePayout)
 		// The kill switch belongs with the money actions: it stops every live run
 		// and turns the feature off, and it is audited like the rest.
 		actions.POST("/bot/kill", d.Handler.Admin.KillBots)

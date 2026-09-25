@@ -43,6 +43,11 @@ type AdminService struct {
 	bots          botStopper
 	settingsCache interface{ BustCache() }
 
+	// payouts is the payout service, through the two methods the console needs.
+	// Nil until main wires it; ResolvePayout refuses rather than settling by any
+	// other route.
+	payouts payoutResolver
+
 	// deposits is the M-Pesa service, through the one method the console needs:
 	// settle the original row. Nil until main wires it; ResolveDeposit refuses
 	// rather than settle by any other route.
@@ -59,6 +64,17 @@ type depositResolver interface {
 // SetDepositResolver wires the M-Pesa service in. main.go calls it; the harness
 // mirrors it.
 func (s *AdminService) SetDepositResolver(r depositResolver) { s.deposits = r }
+
+// payoutResolver is what ResolvePayout needs from MpesaPayoutService. As with
+// deposits, the console never writes a payout outcome itself — it asks the
+// service that owns the callback path, so the guard and the refund are shared.
+type payoutResolver interface {
+	SettleByAdmin(ctx context.Context, originatorID string, paid bool, reason string, adminID uuid.UUID) (bool, error)
+	MarkNeverReceived(ctx context.Context, originatorID, reason string, adminID *uuid.UUID) (bool, error)
+}
+
+// SetPayoutResolver wires the payout service in.
+func (s *AdminService) SetPayoutResolver(r payoutResolver) { s.payouts = r }
 
 func NewAdminService(store *repository.Store, hub Broadcaster, cfg *config.Config, log *slog.Logger) *AdminService {
 	return &AdminService{store: store, hub: hub, cfg: cfg, log: log}
@@ -333,6 +349,114 @@ func (s *AdminService) ResolveDeposit(ctx context.Context, adminID, txID uuid.UU
 		return nil, err
 	}
 	s.fired(models.ActionDepositResolve)
+
+	return s.store.Transactions.GetByID(ctx, txID)
+}
+
+// What an operator can establish about a stuck payout. Three rather than two,
+// because "the customer was not paid" is two different findings with two
+// different records: Safaricom never had the request, or Safaricom had it and it
+// failed. Both refund, so the money is the same either way — but only the first
+// is a state a resend could ever start from, and writing "never received" for a
+// payout M-Pesa did attempt would be a false record.
+const (
+	PayoutOutcomePaid          = "paid"
+	PayoutOutcomeFailed        = "failed"
+	PayoutOutcomeNeverReceived = "never_received"
+)
+
+// ResolvePayout settles a stuck withdrawal's payout on an operator's say-so,
+// after they have checked the M-PESA portal.
+//
+// The same shape as ResolveDeposit, and for the same reason: it settles the
+// ORIGINAL payout row through the service that owns it, so a result arriving
+// afterwards loses the guard and moves nothing. The one difference is which way
+// the money goes — 'paid' moves none, because the debit already happened, and the
+// other two refund.
+//
+// The audit row is written after the settlement, in its own transaction, exactly
+// as ResolveDeposit does and for the same reason: the refund belongs to the
+// wallet service's transaction, whose lock order every settlement keeps, and the
+// console's audit must not be the first path to take a wallet lock from outside
+// it. The payout row and the ledger row both record the operator, so the money is
+// attributed even if the process died between the two writes.
+func (s *AdminService) ResolvePayout(ctx context.Context, adminID, txID uuid.UUID, outcome, reason string) (*models.Transaction, error) {
+	trimmed, err := requireReason(reason)
+	if err != nil {
+		return nil, err
+	}
+	switch outcome {
+	case PayoutOutcomePaid, PayoutOutcomeFailed, PayoutOutcomeNeverReceived:
+	default:
+		return nil, invalid("outcome", "Outcome must be paid, failed or never_received")
+	}
+	if s.payouts == nil {
+		return nil, errors.New("payout resolve: no payout service wired")
+	}
+
+	tx, err := s.store.Transactions.GetByID(ctx, txID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if tx.Type != models.TxWithdrawal {
+		return nil, invalid("transaction", "Only a withdrawal can be resolved this way")
+	}
+	if tx.Status != models.StatusPending {
+		return nil, ErrPayoutSettled
+	}
+
+	payout, err := s.store.Payouts.GetByTransactionID(ctx, txID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, invalid("transaction", "This withdrawal has no payout to resolve")
+		}
+		return nil, err
+	}
+	if !models.PayoutIsOpen(payout.Status) {
+		return nil, ErrPayoutSettled
+	}
+
+	var won bool
+	switch outcome {
+	case PayoutOutcomePaid:
+		won, err = s.payouts.SettleByAdmin(ctx, payout.OriginatorConversationID, true, trimmed, adminID)
+	case PayoutOutcomeFailed:
+		won, err = s.payouts.SettleByAdmin(ctx, payout.OriginatorConversationID, false, trimmed, adminID)
+	default:
+		won, err = s.payouts.MarkNeverReceived(ctx, payout.OriginatorConversationID, trimmed, &adminID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !won {
+		// Settled between the operator's read and their confirm — by a callback,
+		// or by the pass's answer landing. Nothing was written by us and there is
+		// nothing to audit; the row says who did it.
+		return nil, ErrPayoutSettled
+	}
+
+	account, err := s.store.Accounts.GetByID(ctx, tx.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	err = s.store.WithTx(ctx, func(st *repository.Store) error {
+		return s.audit(ctx, st, adminID, models.ActionPayoutResolve, models.TargetTransaction, tx.ID, trimmed,
+			map[string]any{
+				"account_number":             account.AccountNumber,
+				"account_id":                 tx.AccountID.String(),
+				"originator_conversation_id": payout.OriginatorConversationID,
+				"outcome":                    outcome,
+				"amount":                     tx.Amount.String(),
+				"payout_status_before":       payout.Status,
+			})
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.fired(models.ActionPayoutResolve)
 
 	return s.store.Transactions.GetByID(ctx, txID)
 }
