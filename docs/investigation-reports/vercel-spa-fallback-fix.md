@@ -67,7 +67,47 @@ Two properties of that ordering matter:
 Re-run of the report's own route list against production after the deploy, plus the proxy check
 that the catch-all could have broken.
 
-VERIFICATION_PLACEHOLDER
+The fix could not be verified on the branch's own preview deployment. Preview deployments are
+behind Vercel's deployment protection: every path, `/` included, answers `302` to
+`vercel.com/sso-api` before routing is consulted, so the rewrite is unobservable there. Verification
+is therefore against production, after merge.
+
+**Baseline before the fix** (production, 25 September 2026):
+
+| Path | Status |
+|---|---|
+| `/` | 200 `text/html` |
+| `/login` `/register` `/portfolio` `/trade` `/wallet` `/signals` `/profile` | 404 |
+| `/admin` `/admin/login` | 404 |
+| `/nonexistent-path-xyz` | 404 |
+| `/api/v1/symbols` | 401 from the backend, with `x-railway-edge` |
+
+**After the deploy**, two things are checked: that every path above returns 200 and `text/html`
+(including the nonexistent one, which should now reach the app and be redirected client-side), and
+that `/api/v1/symbols` still returns the backend's 401 with Railway's edge headers rather than
+HTML. The second is the check that matters most: it is the regression the catch-all could plausibly
+introduce, and it would present as a client-side JSON parse error rather than as a routing fault.
+
+RESULTS_PENDING
+
+## 5b. An unrelated CI flake seen on this branch
+
+The first CI run failed `TestBotShutdownFinalisesRun` with `bot_lifecycle_test.go:346: reason error,
+want shutdown`. This branch changes one JSON file and one markdown file, so it cannot be the cause.
+Master's five preceding runs all passed, including `2c5c649`, this branch's exact base commit, and
+the test passes 6/6 locally under `-count=6`. A re-run passed all six checks.
+
+The likely mechanism, recorded so it is not re-diagnosed from scratch: the test cancels the run
+context and then calls `Shutdown`. After the cancel, an in-flight `BotRuns.Get` or placement can
+fail with `context canceled` and take a `BotStopError` finalise path (`bot_service.go:710`,
+`bot_service.go:787`) before `Shutdown`'s `requestStop(BotStopShutdown)` (`bot_service.go:237`)
+lands. Under CI's slower, more contended timing the cancel lands mid-operation more often.
+
+This may be a real defect rather than only a flaky test: an orderly shutdown can be recorded in
+operator-visible data as `error` carrying a `context canceled` message. It is not money-affecting —
+the contract is voided and refunded either way — but the stop reason is wrong. Tracked separately;
+deliberately not fixed here, because a routing config fix is not the place for a bot lifecycle
+change.
 
 ## 6. Notes
 
