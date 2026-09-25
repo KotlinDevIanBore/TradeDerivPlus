@@ -35,6 +35,7 @@ type Deps struct {
 		Market  *handlers.MarketHandler
 		WS      *handlers.WSHandler
 		Admin   *handlers.AdminHandler
+		KYC     *handlers.KYCHandler
 	}
 }
 
@@ -103,6 +104,14 @@ func New(d Deps) *gin.Engine {
 		protected.GET("/wallet/transactions", d.Handler.Wallet.Transactions)
 		protected.GET("/wallet/transactions/:id", d.Handler.Wallet.Transaction)
 		protected.GET("/wallet/rate", d.Handler.Wallet.Rate)
+
+		// Identity verification. Its own bucket because each call either signs a
+		// URL or reads an object out of the store, and neither should be free to
+		// call in a loop. Deliberately looser than `money`: a user correcting a
+		// rejected upload may legitimately try several times in a row.
+		kyc := protected.Group("", middleware.RateLimit(rate.Every(time.Second), 10))
+		kyc.GET("/kyc/state", d.Handler.KYC.State)
+		kyc.POST("/kyc/upload-url", d.Handler.KYC.UploadURL)
 
 		// Money movement gets its own tighter bucket on top of the group's.
 		money := protected.Group("", middleware.RateLimit(rate.Every(2*time.Second), 5))

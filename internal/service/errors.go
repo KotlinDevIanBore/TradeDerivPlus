@@ -35,6 +35,15 @@ var (
 	ErrAlreadyReviewed    = errors.New("This submission has already been reviewed")
 	ErrDepositSettled     = errors.New("This deposit has already been settled")
 
+	// Identity verification. Unavailable is a platform state (no object store
+	// configured); the other two are this user's.
+	ErrKYCStorageUnavailable = errors.New("Identity verification is not available right now")
+	ErrKYCReviewPending      = errors.New("Your documents are already with us. Someone will review them")
+	ErrKYCAlreadyVerified    = errors.New("Your identity is already verified")
+	ErrKYCUploadNotFound     = errors.New("We could not find that upload. Start again")
+	ErrKYCDocumentMissing    = errors.New("We did not receive your document. Try uploading it again")
+	ErrKYCDocumentRejected   = errors.New("That file does not look like a JPEG, PNG or PDF")
+
 	// Withdrawals. Disabled is a platform state, in flight is this account's.
 	ErrWithdrawalsDisabled = errors.New("Withdrawals are not available yet")
 	ErrWithdrawalInFlight  = errors.New("A withdrawal is already on its way. Wait for it to finish before starting another")

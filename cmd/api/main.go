@@ -19,6 +19,7 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/routes"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/derivclient"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/ws"
 )
@@ -116,6 +117,32 @@ func run() error {
 	wallet.OnDepositSettled(observability.RecordDeposit)
 	mpesa.OnReconcile(observability.RecordReconcile)
 
+	// Object storage for identity documents. Absent credentials are not a fault:
+	// the deployment simply has no bucket, so an in-memory stub keeps seed
+	// fixtures, CI and local development working while the upload endpoints answer
+	// 503 in production. The same shape as USE_MOCK_MPESA, chosen on configuration
+	// being present rather than on a separate boolean, because there is no reason
+	// to run a stub against a configured bucket.
+	var docs service.DocumentStore
+	if cfg.R2AccountID != "" {
+		r2, err := storage.New(storage.Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2BucketName,
+			Endpoint:        cfg.R2Endpoint,
+		})
+		if err != nil {
+			return err
+		}
+		docs = r2
+		log.Info("object storage ready", "bucket", cfg.R2BucketName)
+	} else {
+		docs = storage.NewStub()
+		log.Warn("object storage not configured: KYC documents use an in-memory stub and do not persist")
+	}
+	kyc := service.NewKYCService(store, docs, cfg, log)
+
 	settings := service.NewSettingsService(store, service.SettingsDefaults{
 		DigitContractsEnabled: cfg.DigitContractsEnabled,
 		BotEnabled:            cfg.BotEnabled,
@@ -183,6 +210,7 @@ func run() error {
 	deps.Handler.Market = handlers.NewMarketHandler(store, feed, signals)
 	deps.Handler.WS = handlers.NewWSHandler(hub, feed, wallet, cfg.CORSOrigins, log)
 	deps.Handler.Admin = handlers.NewAdminHandler(admin, cfg)
+	deps.Handler.KYC = handlers.NewKYCHandler(kyc)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

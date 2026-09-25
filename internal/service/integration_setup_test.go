@@ -30,6 +30,7 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/models"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/derivclient"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/mpesaclient"
 )
@@ -55,8 +56,13 @@ type harness struct {
 	payoutQuerier *stubPayoutQuerier
 	bots          *service.BotService
 	settings      *service.SettingsService
-	events        *captureBroadcaster
-	log           *slog.Logger
+
+	// kyc is the verification service, wired against an in-memory object store so
+	// the whole upload flow is exercisable with no bucket and no credentials.
+	kyc    *service.KYCService
+	docs   *storage.Stub
+	events *captureBroadcaster
+	log    *slog.Logger
 }
 
 // container is started once for the whole package; each test gets clean data
@@ -158,6 +164,18 @@ func newHarness(t *testing.T) *harness {
 		MpesaReconcileEvery:  time.Minute,
 		MpesaReconcileMinAge: 3 * time.Minute,
 		MpesaReconcileGiveUp: 24 * time.Hour,
+
+		// Document handling. Set here for the same reason as the values above: the
+		// harness builds Config directly, so Load's validation and defaults never
+		// run. Leaving KYCMaxDocumentBytes at zero would make every upload
+		// oversize, and every size test would pass for the wrong reason.
+		KYCMaxDocumentBytes:     10 << 20,
+		KYCUploadURLExpiry:      10 * time.Minute,
+		KYCReviewURLExpiry:      5 * time.Minute,
+		KYCAbandonedUploadAfter: 48 * time.Hour,
+		KYCRetentionEvery:       time.Hour,
+		// Zero: never delete. A retention test sets it explicitly.
+		KYCDocumentRetentionDays: 0,
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -239,12 +257,16 @@ func newHarness(t *testing.T) *harness {
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
 
+	docs := storage.NewStub()
+	kyc := service.NewKYCService(store, docs, cfg, log)
+
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
 		pool: pool,
 		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
 		payouts: payouts, payoutSender: sender, payoutQuerier: querier,
 		bots: bots, settings: settings, events: events, log: log,
+		kyc: kyc, docs: docs,
 	}
 }
 

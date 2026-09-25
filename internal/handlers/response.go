@@ -64,6 +64,20 @@ func fail(c *gin.Context, err error) {
 		respondErr(c, http.StatusConflict, err.Error(), "trade_not_open", "")
 	case errors.Is(err, service.ErrDigitNotOpen):
 		respondErr(c, http.StatusConflict, err.Error(), "digit_not_open", "")
+	case errors.Is(err, service.ErrKYCStorageUnavailable):
+		// 503, not 500: the deployment has no object store configured, which is a
+		// missing capability rather than a fault, and a client may retry later.
+		respondErr(c, http.StatusServiceUnavailable, err.Error(), "kyc_storage_unavailable", "")
+	case errors.Is(err, service.ErrKYCReviewPending):
+		respondErr(c, http.StatusConflict, err.Error(), "kyc_review_pending", "")
+	case errors.Is(err, service.ErrKYCAlreadyVerified):
+		respondErr(c, http.StatusConflict, err.Error(), "kyc_already_verified", "")
+	case errors.Is(err, service.ErrKYCUploadNotFound):
+		respondErr(c, http.StatusNotFound, err.Error(), "kyc_upload_not_found", "")
+	case errors.Is(err, service.ErrKYCDocumentMissing):
+		respondErr(c, http.StatusBadRequest, err.Error(), "kyc_document_missing", "")
+	case errors.Is(err, service.ErrKYCDocumentRejected):
+		respondErr(c, http.StatusUnprocessableEntity, err.Error(), "kyc_document_rejected", "file")
 	case errors.Is(err, service.ErrWithdrawalsDisabled):
 		respondErr(c, http.StatusForbidden, err.Error(), "withdrawals_disabled", "")
 	case errors.Is(err, service.ErrWithdrawalInFlight):
