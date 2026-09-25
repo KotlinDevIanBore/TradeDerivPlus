@@ -118,12 +118,17 @@ func run() error {
 	wallet.OnDepositSettled(observability.RecordDeposit)
 	mpesa.OnReconcile(observability.RecordReconcile)
 
-	// Object storage for identity documents. Absent credentials are not a fault:
-	// the deployment simply has no bucket, so an in-memory stub keeps seed
-	// fixtures, CI and local development working while the upload endpoints answer
-	// 503 in production. The same shape as USE_MOCK_MPESA, chosen on configuration
-	// being present rather than on a separate boolean, because there is no reason
-	// to run a stub against a configured bucket.
+	// Object storage for identity documents.
+	//
+	// Three outcomes, not two. Configured: the real client. Unconfigured outside
+	// production: an in-memory stub, so seed fixtures, CI and local development
+	// exercise the whole flow without a bucket. Unconfigured IN production: no
+	// store at all, and the endpoints refuse with 503.
+	//
+	// That third case matters. An earlier version fell back to the stub whatever
+	// the environment, which in production would have accepted identity documents
+	// into memory, told the customer they were submitted, shown an operator a
+	// submission with nothing behind it, and lost everything on the next restart.
 	var docs service.DocumentStore
 	var documentStub *storage.Stub
 	if cfg.R2AccountID != "" {
@@ -139,6 +144,18 @@ func run() error {
 		}
 		docs = r2
 		log.Info("object storage ready", "bucket", cfg.R2BucketName)
+	} else if cfg.Env == "production" {
+		// Production with no bucket: docs stays nil, so every upload endpoint
+		// answers 503 and says so, and the development upload route below is not
+		// registered at all.
+		//
+		// The stub must never stand in here. It keeps documents in memory, so a
+		// customer would be told their identity was submitted, an operator would
+		// see a submission with no document behind it, and a restart would erase
+		// the lot. Refusing is the only honest answer, and it is the same
+		// fail-closed rule Withdraw follows when it has no payout dispatcher.
+		log.Error("object storage is not configured: identity verification will refuse uploads. " +
+			"Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME")
 	} else {
 		stub := storage.NewStub()
 		// Point the stub's presigned URLs at this API's own development upload
