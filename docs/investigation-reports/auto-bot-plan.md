@@ -741,7 +741,7 @@ rewrite.
    (`digit_payout.go:9-14`)? The plan's answer is "demo-only until the table is final", but
    whether to ship even that is yours.
 2. **What is the bot's honest value proposition, and what does the UI say?** Every contract has
-   negative expected value (−0.50% to −10.00%). The plan's copy is "runs your settings for you"
+   negative expected value (−0.50% to −4.50%). The plan's copy is "runs your settings for you"
    and shows the expected return per contract. If you want the number hidden, say so — but
    hiding it is the compliance-relevant choice, not showing it.
 3. **Demo-only for v1, or real money?** Built as a flag (`bot_real_money_enabled`, default
@@ -749,7 +749,7 @@ rewrite.
 4. **Does a bot need regulatory treatment the manual surface does not?** Unknown to
    engineering. If yes, it likely affects the copy in (2) and the real-money gate in (3).
 5. **Which contract types may a bot use?** The plan allows all three with the edge displayed
-   and an amber note on Matches (−10%). Restricting to the −0.50% band (Over 0 / Under 9) is a
+   and an amber note on the worst band (−4.50%: Matches, Over 8, Under 1). Restricting to the −0.50% band (Over 0 / Under 9) is a
    one-line server change if you prefer a smaller burn rate over choice.
 
 ---

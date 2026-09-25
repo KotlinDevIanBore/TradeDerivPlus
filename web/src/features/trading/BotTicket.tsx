@@ -32,10 +32,15 @@ const INTERVALS = [
 const RUN_DURATION_SECONDS = 1800
 
 /**
- * Below this the contract is expensive enough to say so. Matches is −10%; the
- * next worst is −4.5%, so the line falls in a gap rather than through a cluster.
+ * Below this the contract is expensive enough to say so.
+ *
+ * Was −0.05, chosen when Matches sat alone at −10% and the next worst was −4.5%.
+ * Matches is now −4.5% too, so that line would flag nothing at all — the warning
+ * would have gone quiet without anyone noticing. The worst band is now −4.5%
+ * (Matches, Over 8, Under 1) and the next is −4.0%, so the line moves into that
+ * gap and keeps meaning what it meant.
  */
-const EXPENSIVE_EXPECTED_RETURN = -0.05
+const EXPENSIVE_EXPECTED_RETURN = -0.042
 
 export interface BotTicketSubmit {
   contractType: DigitContractType
