@@ -194,9 +194,14 @@ check("pending queue has seeded submissions", len(queue.get("items", [])) > 0,
 
 if queue.get("items"):
     submission = queue["items"][0]
-    check("seeded document is an obvious placeholder",
-          "PLACEHOLDER" in (submission.get("document_url") or ""),
-          submission.get("document_url"))
+    # The field is document_key now, and it holds an R2 object key rather than a
+    # URL. A seeded fixture deliberately has none: the seed process has its own
+    # in-memory stub, separate from the API's, so any key it wrote would name an
+    # object the console could never fetch -- a View button that always failed.
+    # Empty is the honest value, and the queue renders it as "None".
+    check("a seeded submission carries no document",
+          not (submission.get("document_key") or ""),
+          submission.get("document_key"))
 
     target_user = submission["user_id"]
     _, approved = admin.call("POST", f"/admin/kyc/{submission['id']}/approve", {}, expect=200)

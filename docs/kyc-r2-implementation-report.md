@@ -171,7 +171,7 @@ upload; and the sweep cleans unconsumed attempts older than 48 hours.
 | 4 | **`unverified` got its own badge** | Found in the browser: an unverified user's badge read "Pending", because the badge mapped everything non-verified and non-rejected onto `pending`. Now that the two are distinct, that told a user who had submitted nothing that we were reviewing something. |
 | 5 | **`CHECK` constraints taken** | The plan left these optional and asked for an explicit answer. Taken. |
 | 6 | **Repository tests live in `internal/service`** | The plan implied repository-level tests; `internal/repository` has no harness and building a second one to reach three functions was not worth it. The service harness already exposes `store` and `pool`. |
-| 7 | **`scripts/smoke.py` needed updating** | Not in the plan's file list, and missed until CI caught it. `smoke.py:126` asserted a freshly-registered user reads `kyc_status == "pending"`; D9's new default made that `"unverified"`. The assertion now states what the value means rather than just matching it. A genuine consequence of the schema change that the plan's file survey did not anticipate. |
+| 7 | **Both Python scripts needed updating** | Not in the plan's file list at all, and missed until CI caught them one at a time. `smoke.py:126` asserted a freshly-registered user reads `kyc_status == "pending"`; D9's new default made that `"unverified"`. `admin_check.py:197` read the old `document_url` field and expected the `PLACEHOLDER` string the seed no longer writes. Both assertions now state what the value means rather than only matching it. The plan's file survey covered Go and TypeScript and simply did not look at `scripts/`, which is the honest account of the miss. |
 | 8 | **`cmd/seed` writes no document key** | The plan said the placeholder "follows Stage 6". What it became: nothing at all. The seed process has its own in-memory stub, separate from the API's, so any key it wrote would name an object the console could never fetch — a View button that always failed. Empty renders as "None", which is true. |
 
 ---
@@ -249,7 +249,7 @@ presign-then-audit-then-return ordering exists to close. With
 |---|---|
 | **Railway Nixpacks Go version** | Merge PR #12, deploy, read the build log. If it does not follow `go.mod`, add a `nixpacks.toml` or `Dockerfile` pin. Not verifiable from here. |
 | **A real R2 bucket** | §6. |
-| **`scripts/admin_check.py`** | The plan mentioned extending it. Not done — it already consumes the seeded KYC queue before Playwright runs, which is the known order-dependence on the deferred list, and adding upload coverage there would deepen that coupling. The e2e spec covers the flow instead. |
+| **Extending `scripts/admin_check.py` with upload coverage** | The plan mentioned it. Not done — the script already consumes the seeded KYC queue before Playwright runs, which is the known order-dependence on the deferred list, and adding upload coverage there would deepen that coupling. The e2e spec covers the flow instead. The script *was* corrected for the field rename (deviation 7). |
 | **CI environment for the new e2e** | The spec needs no bucket and no new variables, so it should run as-is, but it has not been run *in CI* — only locally against a local API. |
 | **Merging anything** | All six commits are local. Stage 1 is PR #12; stages 2–6 are on `feat/kyc-r2-upload` and not yet pushed or opened. |
 
