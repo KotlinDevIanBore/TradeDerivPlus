@@ -147,6 +147,7 @@ func NewMpesaPayoutService(store *repository.Store, cfg *config.Config, log *slo
 			SecurityCredential: cfg.MpesaSecurityCredential,
 			B2CResultURL:       cfg.MpesaB2CResultURL,
 			B2CTimeoutURL:      cfg.MpesaB2CTimeoutURL,
+			B2CStatusResultURL: cfg.MpesaB2CStatusResultURL,
 		})
 		s.sender = s.client
 		s.querier = s.client
