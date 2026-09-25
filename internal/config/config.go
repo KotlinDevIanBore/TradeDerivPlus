@@ -61,12 +61,65 @@ type Config struct {
 	MpesaCallbackURL    string
 	UseMockMpesa        bool
 
+	// Payouts (B2C). These authenticate as an "API user" created on the M-PESA
+	// organisation portal, not with the STK passkey.
+	//
+	// MpesaSecurityCredential is the initiator's password ALREADY encrypted under
+	// Safaricom's certificate — generate it once with `go run ./cmd/gencred` and
+	// set the result here. The server deliberately never holds the plaintext
+	// password and never reads a certificate.
+	//
+	// The two callback URLs must differ. A queue timeout means "we do not know",
+	// and one handler for both channels cannot tell that from a failure — which
+	// would refund customers who were in fact paid. Load refuses them equal.
+	MpesaInitiatorName      string
+	MpesaSecurityCredential string
+	MpesaB2CResultURL       string
+	MpesaB2CTimeoutURL      string
+	// Status-query answers land here. A third URL because a Transaction Status
+	// result is a different document from a payout result, and a handler that has
+	// to guess which it holds can classify a failed QUERY as a failed payout.
+	MpesaB2CStatusResultURL string
+
+	// The payout reconciliation pass. PROVISIONAL, like the deposit schedule.
+	// GiveUp does NOT refund — it stops asking and hands the row to a person,
+	// because the customer's money is already out and we still do not know.
+	MpesaPayoutQueryEvery time.Duration
+	MpesaPayoutGiveUp     time.Duration
+
+	// STK reconciliation: the pass that asks Daraja about deposits whose
+	// callback has not arrived. The numbers are PROVISIONAL — guesses at what
+	// Daraja tolerates, to be replaced once scripts/daraja_probe.py has been run
+	// against the sandbox (stk-reconciliation-plan.md §2.5). The shape is not
+	// provisional: never query immediately, widen, stop eventually.
+	//
+	// MinAge is floored at 60s in Load. In mock mode the simulated callback
+	// settles a deposit 4–9s after the push; the floor is what keeps the pass off
+	// every deposit the mock is about to resolve, and so keeps smoke.py and the
+	// browser suite untouched.
+	MpesaReconcileEvery  time.Duration
+	MpesaReconcileMinAge time.Duration
+	MpesaReconcileGiveUp time.Duration
+
 	// Money
 	// Deposits arrive in KES, wallets are denominated in USD (gap G8).
 	KESPerUSD           float64
 	MinDepositKES       float64
 	MaxDepositKES       float64
 	DemoStartingBalance float64
+
+	// Withdrawals. Seeds withdrawals_enabled once, like the bot flags: default
+	// FALSE because a withdrawal debits the balance and waits on an M-Pesa payout
+	// that does not exist yet.
+	WithdrawalsEnabled bool
+	// Per-transaction and per-account-per-day ceilings, in KES. PROVISIONAL and a
+	// product decision, not an engineering one: the figures below sit under
+	// Daraja's own B2C limits (a daily 500,000 per the API's limit-rule result
+	// codes) so a refusal happens here, at validation, rather than as a B2C
+	// failure after the customer has already been debited. Deposits are capped at
+	// MAX_DEPOSIT_KES; withdrawals had no ceiling at all before this.
+	MaxWithdrawKES    float64
+	MaxWithdrawDayKES float64
 
 	// Signal bot
 	SignalInterval time.Duration
@@ -96,6 +149,12 @@ type Config struct {
 	SentrySampleRate  float64
 	MetricsToken      string
 }
+
+// MpesaReconcileMinAgeFloor is the least MPESA_RECONCILE_MIN_AGE Load will
+// accept. Below it the pass could reach a deposit the mock callback is still
+// about to settle; above it there is nothing to protect, so it is a floor and
+// not a fixed value.
+const MpesaReconcileMinAgeFloor = 60 * time.Second
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
@@ -133,10 +192,27 @@ func Load() (*Config, error) {
 		MpesaCallbackURL:    getEnv("MPESA_CALLBACK_URL", "http://localhost:8080/api/v1/mpesa/callback"),
 		UseMockMpesa:        getBool("USE_MOCK_MPESA", true),
 
+		MpesaInitiatorName:      getEnv("MPESA_INITIATOR_NAME", ""),
+		MpesaSecurityCredential: getEnv("MPESA_SECURITY_CREDENTIAL", ""),
+		MpesaB2CResultURL:       getEnv("MPESA_B2C_RESULT_URL", ""),
+		MpesaB2CTimeoutURL:      getEnv("MPESA_B2C_TIMEOUT_URL", ""),
+		MpesaB2CStatusResultURL: getEnv("MPESA_B2C_STATUS_RESULT_URL", ""),
+
+		MpesaPayoutQueryEvery: getDuration("MPESA_PAYOUT_QUERY_EVERY", time.Minute),
+		MpesaPayoutGiveUp:     getDuration("MPESA_PAYOUT_GIVE_UP", 24*time.Hour),
+
+		MpesaReconcileEvery:  getDuration("MPESA_RECONCILE_EVERY", time.Minute),
+		MpesaReconcileMinAge: getDuration("MPESA_RECONCILE_MIN_AGE", 3*time.Minute),
+		MpesaReconcileGiveUp: getDuration("MPESA_RECONCILE_GIVE_UP", 24*time.Hour),
+
 		KESPerUSD:           getFloat("KES_PER_USD", 129.50),
 		MinDepositKES:       getFloat("MIN_DEPOSIT_KES", 50),
 		MaxDepositKES:       getFloat("MAX_DEPOSIT_KES", 150000),
 		DemoStartingBalance: getFloat("DEMO_STARTING_BALANCE", 10000),
+
+		WithdrawalsEnabled: getBool("WITHDRAWALS_ENABLED", false),
+		MaxWithdrawKES:     getFloat("MAX_WITHDRAW_KES", 150000),
+		MaxWithdrawDayKES:  getFloat("MAX_WITHDRAW_DAY_KES", 300000),
 
 		SignalInterval: getDuration("SIGNAL_INTERVAL", 2*time.Minute),
 		SignalSymbols:  []string{"R_10", "R_25", "R_50", "R_75", "R_100", "BOOM500", "CRASH500", "EURUSD"},
@@ -176,6 +252,65 @@ func Load() (*Config, error) {
 	}
 	if !c.UseMockMpesa && (c.MpesaConsumerKey == "" || c.MpesaPasskey == "") {
 		return nil, fmt.Errorf("MPESA_CONSUMER_KEY and MPESA_PASSKEY required when USE_MOCK_MPESA=false")
+	}
+	// Payout configuration is validated when any of it is present, so a partial
+	// or collapsed setup fails at boot rather than at the first withdrawal. It is
+	// allowed to be entirely absent: a deployment that only takes deposits needs
+	// none of it, and withdrawals_enabled is off by default.
+	payoutVars := []string{c.MpesaInitiatorName, c.MpesaSecurityCredential,
+		c.MpesaB2CResultURL, c.MpesaB2CTimeoutURL, c.MpesaB2CStatusResultURL}
+	anySet, allSet := false, true
+	for _, v := range payoutVars {
+		if v != "" {
+			anySet = true
+		} else {
+			allSet = false
+		}
+	}
+	if anySet {
+		if !allSet {
+			return nil, fmt.Errorf("payouts need all of MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, " +
+				"MPESA_B2C_RESULT_URL, MPESA_B2C_TIMEOUT_URL and MPESA_B2C_STATUS_RESULT_URL, or none of them")
+		}
+		// Three URLs, three meanings, and each pair must differ. Sharing any two
+		// loses the distinction that tells an outcome from "we do not know", or a
+		// payout's failure from a status query's own.
+		urls := map[string]string{
+			"MPESA_B2C_RESULT_URL":        c.MpesaB2CResultURL,
+			"MPESA_B2C_TIMEOUT_URL":       c.MpesaB2CTimeoutURL,
+			"MPESA_B2C_STATUS_RESULT_URL": c.MpesaB2CStatusResultURL,
+		}
+		seen := map[string]string{}
+		for name, url := range urls {
+			if other, dup := seen[url]; dup {
+				return nil, fmt.Errorf("%s and %s must differ: each carries a different meaning, "+
+					"and one handler for two of them cannot tell an outcome from 'we do not know'", other, name)
+			}
+			seen[url] = name
+		}
+	}
+	if c.MpesaPayoutQueryEvery <= 0 {
+		return nil, fmt.Errorf("MPESA_PAYOUT_QUERY_EVERY must be positive")
+	}
+	if c.MpesaPayoutGiveUp <= 0 {
+		return nil, fmt.Errorf("MPESA_PAYOUT_GIVE_UP must be positive")
+	}
+	if c.MaxWithdrawKES <= 0 || c.MaxWithdrawDayKES <= 0 {
+		return nil, fmt.Errorf("MAX_WITHDRAW_KES and MAX_WITHDRAW_DAY_KES must be positive")
+	}
+	if c.MaxWithdrawDayKES < c.MaxWithdrawKES {
+		return nil, fmt.Errorf("MAX_WITHDRAW_DAY_KES (%.0f) must be at least MAX_WITHDRAW_KES (%.0f), or no withdrawal of the maximum size could ever be made",
+			c.MaxWithdrawDayKES, c.MaxWithdrawKES)
+	}
+	if c.MpesaReconcileMinAge < MpesaReconcileMinAgeFloor {
+		c.MpesaReconcileMinAge = MpesaReconcileMinAgeFloor
+	}
+	if c.MpesaReconcileEvery <= 0 {
+		return nil, fmt.Errorf("MPESA_RECONCILE_EVERY must be positive")
+	}
+	if c.MpesaReconcileGiveUp <= c.MpesaReconcileMinAge {
+		return nil, fmt.Errorf("MPESA_RECONCILE_GIVE_UP (%s) must be longer than MPESA_RECONCILE_MIN_AGE (%s), or nothing is ever queried",
+			c.MpesaReconcileGiveUp, c.MpesaReconcileMinAge)
 	}
 	return c, nil
 }

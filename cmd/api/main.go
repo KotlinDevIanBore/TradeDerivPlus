@@ -90,6 +90,20 @@ func run() error {
 	auth := service.NewAuthService(store, cfg)
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, hub, cfg, log)
+	payouts := service.NewMpesaPayoutService(store, cfg, log)
+	// Both directions at once: the wallet asks payouts to send, and payouts
+	// reports outcomes back to the wallet, which is the only thing that moves
+	// money. Wiring one without the other would leave a payout able to win its
+	// guard with nowhere to send the result.
+	wallet.SetPayouts(payouts)
+	// A collapsed or half-configured payout setup is a failed boot, not a failed
+	// withdrawal. Mock mode has nothing to validate.
+	if err := payouts.ValidateConfig(); err != nil {
+		return err
+	}
+	payouts.OnSettled(observability.RecordPayout)
+	payouts.OnQueried(observability.RecordPayoutQuery)
+	payouts.OnFloat(observability.RecordB2CUtilityFloat)
 	trading := service.NewTradingService(store, feed, hub, log)
 	digits := service.NewDigitService(store, feed, hub, service.DigitLimits{
 		MaxStake:          decimal.NewFromFloat(cfg.DigitMaxStake),
@@ -100,12 +114,14 @@ func run() error {
 	admin.SetConnectionCounter(hub)
 	admin.OnAction(observability.RecordAdminAction)
 	wallet.OnDepositSettled(observability.RecordDeposit)
+	mpesa.OnReconcile(observability.RecordReconcile)
 
 	settings := service.NewSettingsService(store, service.SettingsDefaults{
 		DigitContractsEnabled: cfg.DigitContractsEnabled,
 		BotEnabled:            cfg.BotEnabled,
 		BotAllowlist:          cfg.BotAllowlist,
 		BotRealMoneyEnabled:   cfg.BotRealMoneyEnabled,
+		WithdrawalsEnabled:    cfg.WithdrawalsEnabled,
 	}, log)
 	if err := settings.Bootstrap(ctx); err != nil {
 		return err
@@ -123,10 +139,26 @@ func run() error {
 	// every loop stops on its next check, with these it is immediate.
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
+	// The console settles a stuck deposit through the M-Pesa service, never on
+	// its own: same guards, same lock order as a callback.
+	admin.SetDepositResolver(mpesa)
+	admin.SetPayoutResolver(payouts)
+	// Withdrawals read their flag through the settings cache. Without this the
+	// wallet refuses every withdrawal, which is the safe direction.
+	wallet.SetWithdrawalFlags(settings)
 
 	go feed.Run(ctx)
 	trading.Start(ctx)
 	digits.Start(ctx)
+	// The reconciliation pass. After NewWalletService above, which registered
+	// the settlement handler: a pass with nowhere to send a result refuses to
+	// settle rather than consume the guard, so the order is what makes the boot
+	// pass able to credit anything.
+	mpesa.Start(ctx)
+	// The payout pass. After wallet.SetPayouts above, which registered the
+	// settlement handler: a pass that settled with nowhere to send the result
+	// would consume the guard and leave the ledger pending for ever.
+	payouts.Start(ctx)
 	// After digits.Start, whose boot sweep has already settled or voided what it
 	// could: runs left live by the previous process are ended here rather than
 	// resumed, and a contract still open folds into its (now stopped) run through
@@ -138,10 +170,10 @@ func run() error {
 
 	// Refresh the gauges, including the ledger drift number that says whether
 	// any balance has moved without a matching ledger row.
-	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount), log, time.Minute)
+	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount, cfg.MpesaReconcileMinAge), log, time.Minute)
 
 	// --- HTTP ---------------------------------------------------------------
-	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa}
+	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts}
 	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
@@ -163,7 +195,11 @@ func run() error {
 	go func() {
 		log.Info("api listening",
 			"port", cfg.Port, "env", cfg.Env,
-			"mock_feed", cfg.UseMockFeed, "mock_mpesa", cfg.UseMockMpesa)
+			"mock_feed", cfg.UseMockFeed, "mock_mpesa", cfg.UseMockMpesa,
+			"mpesa_reconcile_every", cfg.MpesaReconcileEvery,
+			"mpesa_reconcile_min_age", cfg.MpesaReconcileMinAge,
+			"mpesa_reconcile_give_up", cfg.MpesaReconcileGiveUp,
+			"payouts_configured", cfg.MpesaInitiatorName != "" || cfg.UseMockMpesa)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen failed", "err", err)
 			stop()

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -36,20 +37,26 @@ import (
 // harness is everything a test needs: a live database, a store, and the
 // services wired the same way main.go wires them.
 type harness struct {
-	t        *testing.T
-	ctx      context.Context
-	store    *repository.Store
-	cfg      *config.Config
-	feed     *service.FeedService
-	trading  *service.TradingService
-	digits   *service.DigitService
-	wallet   *service.WalletService
-	admin    *service.AdminService
-	mpesa    *service.MpesaService
-	bots     *service.BotService
-	settings *service.SettingsService
-	events   *captureBroadcaster
-	log      *slog.Logger
+	t       *testing.T
+	ctx     context.Context
+	pool    *pgxpool.Pool
+	store   *repository.Store
+	cfg     *config.Config
+	feed    *service.FeedService
+	trading *service.TradingService
+	digits  *service.DigitService
+	wallet  *service.WalletService
+	admin   *service.AdminService
+	mpesa   *service.MpesaService
+	payouts *service.MpesaPayoutService
+
+	// payoutSender records what was sent and answers however a test scripts it.
+	payoutSender  *stubPayoutSender
+	payoutQuerier *stubPayoutQuerier
+	bots          *service.BotService
+	settings      *service.SettingsService
+	events        *captureBroadcaster
+	log           *slog.Logger
 }
 
 // container is started once for the whole package; each test gets clean data
@@ -91,7 +98,9 @@ func TestMain(m *testing.M) {
 }
 
 // newHarness gives the test a fresh schema and wired services.
-func newHarness(t *testing.T) *harness {
+// freshPool connects to the shared container and empties it: each test starts
+// from no schema and no rows, and applies whatever migrations it needs.
+func freshPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 
@@ -101,13 +110,19 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(pool.Close)
 
-	// Drop and re-apply so each test starts from a known schema and no rows.
 	if _, err := pool.Exec(ctx, `
 		DROP SCHEMA public CASCADE;
 		CREATE SCHEMA public;`); err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
+	return pool
+}
 
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	ctx := context.Background()
+
+	pool := freshPool(t)
 	root := repoRoot(t)
 	if err := repository.Migrate(ctx, pool, filepath.Join(root, "migrations")); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -123,6 +138,26 @@ func newHarness(t *testing.T) *harness {
 		MaxDepositKES:       150000,
 		DemoStartingBalance: 10000,
 		UseMockMpesa:        true,
+
+		// The production defaults. As with the reconciliation values below, the
+		// harness builds Config directly so Load's validation never runs on it —
+		// a test that wants a different ceiling sets it itself.
+		MaxWithdrawKES:    150000,
+		MaxWithdrawDayKES: 300000,
+
+		// The payout pass's schedule. Omitting these left GiveUp at zero, which
+		// made every payout instantly past the horizon — and the give-up test
+		// passed anyway, because it could not tell a working horizon from one at
+		// zero. The three tests that assert the pass ASKS are what caught it.
+		MpesaPayoutQueryEvery: time.Minute,
+		MpesaPayoutGiveUp:     24 * time.Hour,
+
+		// The production defaults. Load's 60s floor is not applied here — the
+		// harness builds the struct directly — so a test that wants the pass
+		// to reach a fresh deposit lowers MinAge itself, deliberately.
+		MpesaReconcileEvery:  time.Minute,
+		MpesaReconcileMinAge: 3 * time.Minute,
+		MpesaReconcileGiveUp: 24 * time.Hour,
 	}
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -139,6 +174,23 @@ func newHarness(t *testing.T) *harness {
 
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, noopBroadcaster{}, cfg, log)
+	payouts := service.NewMpesaPayoutService(store, cfg, log)
+	wallet.SetPayouts(payouts)
+	// A sender that accepts and never reports back, replacing mock mode's
+	// simulator for tests.
+	//
+	// Mock mode's own sender delivers a result a few seconds later on a timer,
+	// which is right for a dev server and wrong for a test: every assertion about
+	// a withdrawal that is still in flight would be racing that timer, and would
+	// pass or fail by how fast the machine is. Tests deliver results explicitly
+	// through h.deliverPayoutResult instead, so what is under test is the
+	// classification and the guards rather than the scheduler.
+	sender := &stubPayoutSender{}
+	payouts.SetSenderForTest(sender)
+	// A querier that records questions and never answers them: the answer arrives
+	// on its own channel, which a test delivers explicitly.
+	querier := &stubPayoutQuerier{}
+	payouts.SetQuerierForTest(querier)
 	trading := service.NewTradingService(store, feed, noopBroadcaster{}, log)
 	// The production defaults, stated rather than inherited: a test that needs
 	// different limits constructs its own service with its own DigitLimits.
@@ -155,7 +207,14 @@ func newHarness(t *testing.T) *harness {
 		DigitContractsEnabled: true,
 		BotEnabled:            true,
 		BotRealMoneyEnabled:   true,
+		// On in the harness, off in production: the existing withdrawal tests are
+		// about the KYC gate, the overdraw guard and the freeze, and the platform
+		// flag would short-circuit all three. A test that wants the flag off sets
+		// it off itself (TestWithdrawalsAreRefusedWhileTheFeatureIsOff).
+		WithdrawalsEnabled: true,
 	}, log)
+	// Same wiring main.go does: the wallet refuses every withdrawal without it.
+	wallet.SetWithdrawalFlags(settings)
 	if err := settings.Bootstrap(ctx); err != nil {
 		t.Fatalf("settings bootstrap: %v", err)
 	}
@@ -169,6 +228,8 @@ func newHarness(t *testing.T) *harness {
 	// the switch exercises the immediate stop rather than only the row update.
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
+	admin.SetDepositResolver(mpesa)
+	admin.SetPayoutResolver(payouts)
 	// Poll fast: settlement in a test is driven by an injected tick, not by a
 	// clock, so the only thing a real poll interval would add is waiting.
 	bots.SetPollInterval(5 * time.Millisecond)
@@ -180,7 +241,9 @@ func newHarness(t *testing.T) *harness {
 
 	return &harness{
 		t: t, ctx: ctx, store: store, cfg: cfg,
+		pool: pool,
 		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
+		payouts: payouts, payoutSender: sender, payoutQuerier: querier,
 		bots: bots, settings: settings, events: events, log: log,
 	}
 }
@@ -297,6 +360,179 @@ func (h *harness) pendingDeposit(userID, accountID uuid.UUID, kes int64) (uuid.U
 		h.t.Fatalf("start deposit: %v", err)
 	}
 	return resp.TransactionID, resp.CheckoutRequestID
+}
+
+// countWithdrawals and countRows are for asserting that a refused call wrote
+// nothing, and that a refund wrote no extra row.
+func (h *harness) countWithdrawals(accountID uuid.UUID) int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM transactions WHERE account_id = $1 AND type = 'withdrawal'`,
+		accountID).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
+func (h *harness) countRows(accountID uuid.UUID) int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM transactions WHERE account_id = $1`, accountID).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
+// pendingWithdrawalID is the account's one in-flight withdrawal. There can only
+// be one (migration 0008), which is what makes this unambiguous.
+func (h *harness) pendingWithdrawalID(accountID uuid.UUID) uuid.UUID {
+	h.t.Helper()
+	var id uuid.UUID
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT id FROM transactions WHERE account_id = $1 AND type = 'withdrawal' AND status = 'pending'`,
+		accountID).Scan(&id); err != nil {
+		h.t.Fatalf("read the pending withdrawal: %v", err)
+	}
+	return id
+}
+
+// stubPayoutSender is Daraja's payout side, under a test's control. It records
+// every request, answers however the test scripts it, and never delivers a
+// result on its own.
+type stubPayoutSender struct {
+	mu   sync.Mutex
+	sent []mpesaclient.B2CRequest
+	// err, when set, is what SendB2C returns instead of accepting.
+	err error
+}
+
+func (p *stubPayoutSender) SendB2C(_ context.Context, r mpesaclient.B2CRequest) (*mpesaclient.B2CAccepted, error) {
+	p.mu.Lock()
+	p.sent = append(p.sent, r)
+	err := p.err
+	p.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &mpesaclient.B2CAccepted{
+		ConversationID:           "AG_TEST_" + r.OriginatorConversationID,
+		OriginatorConversationID: r.OriginatorConversationID,
+		ResponseDescription:      "Accept the service request successfully.",
+	}, nil
+}
+
+func (p *stubPayoutSender) fail(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.err = err
+}
+
+func (p *stubPayoutSender) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.sent)
+}
+
+func (p *stubPayoutSender) last() (mpesaclient.B2CRequest, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.sent) == 0 {
+		return mpesaclient.B2CRequest{}, false
+	}
+	return p.sent[len(p.sent)-1], true
+}
+
+// stubPayoutQuerier is the Transaction Status endpoint under a test's control. It
+// records what was asked and never answers: the answer is asynchronous in
+// reality, and a test delivers it through h.deliverStatusResult.
+type stubPayoutQuerier struct {
+	mu    sync.Mutex
+	asked []string
+	err   error
+}
+
+func (q *stubPayoutQuerier) QueryTransactionStatus(_ context.Context, r mpesaclient.StatusRequest) (*mpesaclient.StatusAccepted, error) {
+	q.mu.Lock()
+	q.asked = append(q.asked, r.OriginatorConversationID)
+	err := q.err
+	q.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &mpesaclient.StatusAccepted{ConversationID: "AG_STATUS", ResponseDescription: "accepted"}, nil
+}
+
+func (q *stubPayoutQuerier) fail(err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.err = err
+}
+
+func (q *stubPayoutQuerier) countFor(originatorID string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, id := range q.asked {
+		if id == originatorID {
+			n++
+		}
+	}
+	return n
+}
+
+// statusResultBody is the document Daraja posts to the status channel. Note that
+// its ResultCode is about the QUERY, and the payout's own state is in the
+// TransactionStatus parameter — the distinction the separate channel exists for.
+func statusResultBody(originatorID, queryCode, txStatus, receipt string) []byte {
+	params := ""
+	if txStatus != "" {
+		params = `{"Key":"TransactionStatus","Value":"` + txStatus + `"}`
+		if receipt != "" {
+			params += `,{"Key":"ReceiptNo","Value":"` + receipt + `"}`
+		}
+	}
+	return []byte(`{"Result":{"ResultType":0,"ResultCode":"` + queryCode + `","ResultDesc":"query result",` +
+		`"OriginatorConversationID":"` + originatorID + `","ConversationID":"AG_TEST_` + originatorID + `",` +
+		`"ResultParameters":{"ResultParameter":[` + params + `]}}}`)
+}
+
+// deliverStatusResult posts a status answer the way the status route would.
+func (h *harness) deliverStatusResult(originatorID, queryCode, txStatus, receipt string, arrival mpesaclient.PayoutArrival) error {
+	h.t.Helper()
+	return h.payouts.HandleStatusResult(h.ctx, statusResultBody(originatorID, queryCode, txStatus, receipt), arrival)
+}
+
+// payoutResultBody builds the JSON Daraja posts, so a test drives the real
+// parser and the real classification rather than a shortcut past them.
+func payoutResultBody(originatorID, code, desc, receipt string) []byte {
+	params := ""
+	if receipt != "" {
+		params = `{"Key":"TransactionReceipt","Value":"` + receipt + `"},` +
+			`{"Key":"B2CUtilityAccountAvailableFunds","Value":425000.00}`
+	}
+	return []byte(`{"Result":{"ResultType":0,"ResultCode":"` + code + `","ResultDesc":"` + desc + `",` +
+		`"OriginatorConversationID":"` + originatorID + `","ConversationID":"AG_TEST_` + originatorID + `",` +
+		`"TransactionID":"` + receipt + `","ResultParameters":{"ResultParameter":[` + params + `]}}}`)
+}
+
+// deliverPayoutResult posts a result to the payout service the way a route
+// would, with the arrival channel the caller chooses — which is the thing that
+// decides whether an outcome may be acted on.
+func (h *harness) deliverPayoutResult(originatorID, code, desc, receipt string, arrival mpesaclient.PayoutArrival) error {
+	h.t.Helper()
+	return h.payouts.HandleResult(h.ctx, payoutResultBody(originatorID, code, desc, receipt), arrival)
+}
+
+// payoutFor reads the payout row belonging to a withdrawal.
+func (h *harness) payoutFor(txID uuid.UUID) *models.MpesaPayout {
+	h.t.Helper()
+	p, err := h.store.Payouts.GetByTransactionID(h.ctx, txID)
+	if err != nil {
+		h.t.Fatalf("read the payout for %s: %v", txID, err)
+	}
+	return p
 }
 
 // darajaCallback builds the payload Safaricom would POST for an outcome.

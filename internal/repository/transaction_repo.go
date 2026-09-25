@@ -26,6 +26,42 @@ func (r *TransactionRepo) Insert(ctx context.Context, t *models.Transaction) err
 	return mapErr(err)
 }
 
+// UpdateStatusIfPending moves a transaction off 'pending' and reports whether
+// this call was the one that moved it.
+//
+// For money that arrives asynchronously, the guard is the difference between
+// crediting once and crediting per delivery: an M-Pesa callback can be retried,
+// and a caller that checked the status in a separate statement can lose the race
+// between the check and the write. Here the check and the write are the same
+// statement, so exactly one caller sees true.
+func (r *TransactionRepo) UpdateStatusIfPending(ctx context.Context, id uuid.UUID, status string, metadata map[string]any) (bool, error) {
+	tag, err := r.db.Exec(ctx,
+		`UPDATE transactions SET status = $2, metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb
+		 WHERE id = $1 AND status = 'pending'`,
+		id, status, metadata)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// MergeMetadata adds keys to a row's metadata and touches nothing else — in
+// particular not status.
+//
+// It exists because the one place that wrote metadata after a deposit was
+// initiated did so through UpdateStatus, re-asserting 'pending' as a side
+// effect. A settlement landing in the gap between the push being accepted and
+// that write was reverted to pending with the wallet already credited, and
+// nothing could repair it afterwards: the mpesa_requests row was already
+// terminal, so every later settle attempt lost its guard. Metadata writes must
+// not be able to move status, and this is the method that cannot.
+func (r *TransactionRepo) MergeMetadata(ctx context.Context, id uuid.UUID, metadata map[string]any) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE transactions SET metadata = COALESCE(metadata,'{}'::jsonb) || $2::jsonb WHERE id = $1`,
+		id, metadata)
+	return mapErr(err)
+}
+
 func (r *TransactionRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status string, metadata map[string]any) error {
 	_, err := r.db.Exec(ctx,
 		`UPDATE transactions SET status = $2, metadata = COALESCE(metadata,'{}'::jsonb) || $3::jsonb WHERE id = $1`,
@@ -101,7 +137,10 @@ type AdminTransaction struct {
 }
 
 // SearchAll backs the admin transaction list: cross-account, filterable, and
-// searchable by reference, receipt, phone, account number or id.
+// searchable by reference, receipt, phone, account number or id — and by
+// checkout_request_id, which is the reference a customer can read off the
+// pending deposit screen, and the only one a deposit settled without a receipt
+// will ever have.
 func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status string, limit, offset int) ([]AdminTransaction, int, error) {
 	const from = `
 		FROM transactions t
@@ -115,6 +154,7 @@ func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status s
 		  AND ($1 = ''
 		       OR t.reference ILIKE '%' || $1 || '%'
 		       OR t.metadata->>'receipt' ILIKE '%' || $1 || '%'
+		       OR t.metadata->>'checkout_request_id' ILIKE '%' || $1 || '%'
 		       OR u.phone_number ILIKE '%' || $1 || '%'
 		       OR a.account_number ILIKE '%' || $1 || '%'
 		       OR t.id::text = $1)`
@@ -149,12 +189,20 @@ func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status s
 }
 
 // TodayTotals powers two dashboard tiles in one query per type.
+//
+// It counts rows that have moved money, which is balanceAffectingRows and not
+// status = 'completed'. For deposits those are the same thing. For withdrawals
+// they are not: a pending withdrawal has already been debited, and nothing in
+// this codebase can yet move a withdrawal off 'pending' — so filtering on
+// 'completed' made the withdrawal tiles structurally zero while real money was
+// leaving wallets. One predicate, so the dashboard cannot disagree with the
+// ledger or the drift gauge about what counts.
 func (r *TransactionRepo) TodayTotals(ctx context.Context, txType string) (count int, total decimal.Decimal, err error) {
 	var sum decimal.NullDecimal
 	err = r.db.QueryRow(ctx, `
 		SELECT count(*), sum(abs(amount))
 		FROM transactions
-		WHERE type = $1 AND status = 'completed' AND created_at >= date_trunc('day', now())`,
+		WHERE type = $1 AND `+balanceAffectingRows+` AND created_at >= date_trunc('day', now())`,
 		txType).Scan(&count, &sum)
 	if err != nil {
 		return 0, decimal.Zero, mapErr(err)
@@ -163,6 +211,26 @@ func (r *TransactionRepo) TodayTotals(ctx context.Context, txType string) (count
 		total = sum.Decimal
 	}
 	return count, total, nil
+}
+
+// WithdrawnTodayUSD is what this account has already taken out today, for the
+// daily cap. It counts pending alongside completed for the same reason
+// TodayTotals does: a pending withdrawal is money already gone, and letting it
+// fall outside the cap would let the cap be bypassed simply by not waiting.
+func (r *TransactionRepo) WithdrawnTodayUSD(ctx context.Context, accountID uuid.UUID) (decimal.Decimal, error) {
+	var sum decimal.NullDecimal
+	err := r.db.QueryRow(ctx, `
+		SELECT sum(abs(amount)) FROM transactions
+		WHERE account_id = $1 AND type = 'withdrawal' AND `+balanceAffectingRows+`
+		  AND created_at >= date_trunc('day', now())`,
+		accountID).Scan(&sum)
+	if err != nil {
+		return decimal.Zero, mapErr(err)
+	}
+	if !sum.Valid {
+		return decimal.Zero, nil
+	}
+	return sum.Decimal, nil
 }
 
 // DepositsByHour is the dashboard's 24-hour success-versus-failure series. A

@@ -94,6 +94,8 @@ export function AdminAuditLog() {
             { label: 'Adjustments', value: 'manual_adjustment' },
             { label: 'KYC approvals', value: 'kyc_approve' },
             { label: 'KYC rejections', value: 'kyc_reject' },
+            { label: 'Deposit resolutions', value: 'deposit_resolve' },
+            { label: 'Payout resolutions', value: 'payout_resolve' },
           ]}
         />
       </div>

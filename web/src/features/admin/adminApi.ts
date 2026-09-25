@@ -3,6 +3,7 @@ import { qs } from '@/api/client'
 import type { Account, BotRun, Page } from '@/types'
 import { useAdminSession } from './adminSession'
 import type {
+  AdminPayout,
   AdminBotRun,
   AdminLoginResult,
   AdminTransaction,
@@ -128,6 +129,12 @@ export const adminApi = {
       })}`,
     ),
 
+  /** filter: open (default) | unknown | given_up | settled */
+  payouts: (p: { filter?: string; page?: number; limit?: number } = {}) =>
+    request<Page<AdminPayout>>(
+      `/admin/payouts${qs({ filter: p.filter, page: p.page ?? 1, limit: p.limit ?? 25 })}`,
+    ),
+
   kyc: (status = 'pending', page = 1) =>
     request<Page<KYCSubmission>>(`/admin/kyc${qs({ status, page, limit: 25 })}`),
 
@@ -153,6 +160,24 @@ export const adminApi = {
     request<{ transaction: AdminTransaction; wallet: unknown }>(
       `/admin/accounts/${accountId}/adjust`, 'POST', { amount, balance_type, reason },
     ),
+
+  /**
+   * Settles a stuck deposit's original ledger row, through the same path a
+   * callback takes — so a callback that turns up later credits nothing. This,
+   * not adjust, is how a deposit that never got its callback is closed.
+   */
+  resolveDeposit: (id: string, outcome: 'completed' | 'failed', reason: string) =>
+    request<AdminTransaction>(`/admin/deposits/${id}/resolve`, 'POST', { outcome, reason }),
+
+  /**
+   * Settles a stuck withdrawal's payout, by the WITHDRAWAL's transaction id.
+   * 'paid' moves no money — the debit already happened. The other two return the
+   * customer's balance, and differ only in what they record: never_received means
+   * M-Pesa has no trace of the request, failed means M-Pesa had it and it did not
+   * go through.
+   */
+  resolvePayout: (transactionId: string, outcome: 'paid' | 'failed' | 'never_received', reason: string) =>
+    request<AdminTransaction>(`/admin/payouts/${transactionId}/resolve`, 'POST', { outcome, reason }),
 
   approveKYC: (id: string) => request<KYCSubmission>(`/admin/kyc/${id}/approve`, 'POST', {}),
 
@@ -184,4 +209,5 @@ export const adminKeys = {
   kyc: (status: string, page: number) => ['admin', 'kyc', status, page] as const,
   audit: (p: unknown) => ['admin', 'audit', p] as const,
   botRuns: (p: unknown) => ['admin', 'bot-runs', p] as const,
+  payouts: (p: unknown) => ['admin', 'payouts', p] as const,
 }

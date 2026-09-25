@@ -312,7 +312,9 @@ export function AdminUserDetailScreen() {
                 {action.account.account_type.toUpperCase()} {action.account.account_number}
               </strong>
               . This writes a ledger row that cannot be undone; a mistake is corrected with a
-              second adjustment.
+              second adjustment. For a deposit that never got its M-Pesa confirmation, use{' '}
+              <em>Mark received</em> on the transaction itself instead — an adjustment leaves the
+              deposit pending, and a late confirmation would credit it a second time.
             </>
           ) : null
         }

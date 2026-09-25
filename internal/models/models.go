@@ -134,6 +134,70 @@ type MpesaRequest struct {
 	ResultCode        *int            `json:"result_code"`
 	ResultDesc        *string         `json:"result_desc"`
 	CreatedAt         time.Time       `json:"created_at"`
+
+	// Reconciliation state (migration 0007), for a pending row whose callback
+	// has not arrived. ReconcileAttempts counts the queries Daraja answered
+	// without resolving it; NextQueryAt is when the pass may next ask. Nil only
+	// on rows that were already terminal when 0007 ran.
+	ReconcileAttempts int        `json:"reconcile_attempts"`
+	NextQueryAt       *time.Time `json:"next_query_at"`
+}
+
+// Payout lifecycle, on mpesa_payouts.status. The two middle states are the
+// point of the table: they are what "we do not know" and "we know it never
+// happened" look like when they have to be told apart by code rather than by a
+// human reading a log.
+const (
+	// PayoutPending: reserved in the same transaction as the debit, nothing sent.
+	PayoutPending = "pending"
+	// PayoutSent: Daraja accepted the request and returned a ConversationID.
+	PayoutSent = "sent"
+	// PayoutUnknown: the send was ambiguous — a transport failure or a timeout
+	// after dispatch. Daraja may be holding the request. Nothing may be assumed
+	// in either direction from here, and in particular the customer must not be
+	// refunded: a refund plus a payout Safaricom did accept is money gone twice,
+	// and B2C payouts cannot be reversed through any API.
+	PayoutUnknown = "unknown"
+	// PayoutNeverReceived: established that Safaricom never had the request.
+	// Distinct from PayoutUnknown deliberately — it is the only state in which a
+	// refund is provably safe without Daraja having said anything about the
+	// payment, because there is nothing queued that could pay.
+	PayoutNeverReceived = "never_received"
+	// PayoutCompleted: result code 0. The customer has the money.
+	PayoutCompleted = "completed"
+	// PayoutFailed: refused at the door, or a terminal failure code.
+	PayoutFailed = "failed"
+)
+
+// PayoutIsOpen reports whether a payout's outcome is still undecided, which is
+// what the reconciliation pass and the operator view both key on.
+func PayoutIsOpen(status string) bool {
+	return status == PayoutPending || status == PayoutSent || status == PayoutUnknown
+}
+
+// MpesaPayout is one outbound payout request.
+type MpesaPayout struct {
+	ID            uuid.UUID `json:"id"`
+	TransactionID uuid.UUID `json:"transaction_id"`
+
+	OriginatorConversationID string  `json:"originator_conversation_id"`
+	ConversationID           *string `json:"conversation_id"`
+
+	PhoneNumber string          `json:"phone_number"`
+	Amount      decimal.Decimal `json:"amount"`
+	Status      string          `json:"status"`
+
+	RequestedAt *time.Time `json:"requested_at"`
+	ResultCode  *string    `json:"result_code"`
+	ResultDesc  *string    `json:"result_desc"`
+	Receipt     *string    `json:"receipt"`
+	SettledBy   *string    `json:"settled_by"`
+
+	ReconcileAttempts int        `json:"reconcile_attempts"`
+	NextQueryAt       *time.Time `json:"next_query_at"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Symbol struct {
@@ -219,6 +283,14 @@ const (
 	// switch also turns the feature off for everyone, and an audit log that
 	// filed both under one name could not tell the two apart.
 	ActionBotRunStop = "bot_run_stop"
+	// ActionDepositResolve settles a pending deposit from the console — the
+	// original ledger row, through the same path a callback takes, so a late
+	// callback afterwards credits nothing.
+	ActionDepositResolve = "deposit_resolve"
+	// ActionPayoutResolve settles a stuck withdrawal's payout from the console —
+	// the original row, through the same settle every other path uses, so a
+	// result arriving afterwards credits or refunds nothing.
+	ActionPayoutResolve = "payout_resolve"
 )
 
 const (

@@ -29,6 +29,7 @@ type SettingsDefaults struct {
 	BotEnabled            bool
 	BotAllowlist          string
 	BotRealMoneyEnabled   bool
+	WithdrawalsEnabled    bool
 }
 
 func (d SettingsDefaults) asMap() map[string]string {
@@ -37,6 +38,7 @@ func (d SettingsDefaults) asMap() map[string]string {
 		repository.SettingBotEnabled:            strconv.FormatBool(d.BotEnabled),
 		repository.SettingBotAllowlist:          d.BotAllowlist,
 		repository.SettingBotRealMoneyEnabled:   strconv.FormatBool(d.BotRealMoneyEnabled),
+		repository.SettingWithdrawalsEnabled:    strconv.FormatBool(d.WithdrawalsEnabled),
 	}
 }
 
@@ -88,6 +90,7 @@ func (s *SettingsService) Bootstrap(ctx context.Context) error {
 		repository.SettingBotEnabled,
 		repository.SettingBotAllowlist,
 		repository.SettingBotRealMoneyEnabled,
+		repository.SettingWithdrawalsEnabled,
 	} {
 		if _, err := s.settings.Get(ctx, key); err == nil {
 			continue
@@ -152,6 +155,13 @@ func (s *SettingsService) DigitContractsEnabled(ctx context.Context) (bool, erro
 // BotEnabled is the global automated-trading switch. Unlike the digit flag it
 // gates the service, not just the surface: StartRun refuses when it is off, and a
 // live run stops on its next check.
+// WithdrawalsEnabled reports whether the withdrawal path is open. Read on every
+// withdrawal attempt and on /auth/me, through the same cache as the other flags,
+// so turning it on takes effect without a deploy.
+func (s *SettingsService) WithdrawalsEnabled(ctx context.Context) (bool, error) {
+	return s.cachedBool(ctx, repository.SettingWithdrawalsEnabled)
+}
+
 func (s *SettingsService) BotEnabled(ctx context.Context) (bool, error) {
 	return s.cachedBool(ctx, repository.SettingBotEnabled)
 }

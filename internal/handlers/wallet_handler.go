@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"io"
 	"net/http"
 	"strconv"
 
@@ -150,6 +151,60 @@ func (h *WalletHandler) MpesaCallback(mpesa *service.MpesaService) gin.HandlerFu
 			return
 		}
 		if err := mpesa.HandleCallback(c.Request.Context(), cb); err != nil {
+			_ = c.Error(err)
+		}
+		c.JSON(http.StatusOK, gin.H{"ResultCode": 0, "ResultDesc": "Accepted"})
+	}
+}
+
+// B2CResult and B2CTimeout are two routes on purpose, and the only thing that
+// distinguishes them is which one Daraja posted to.
+//
+// That distinction cannot be recovered from the body, and it decides whether an
+// outcome may be acted on: a payload on the timeout channel means Daraja's queue
+// gave up before it knew what happened, so acting on its result code can refund a
+// customer who was paid. Routing both to one handler — which is what a
+// neighbouring production system does — throws the distinction away at the door.
+//
+// Both always answer 200. Daraja retries anything else, and a retry storm against
+// a payout callback is the last thing worth inviting; a body we cannot handle is
+// logged and dropped rather than argued with.
+func (h *WalletHandler) B2CResult(payouts *service.MpesaPayoutService) gin.HandlerFunc {
+	return h.b2cCallback(payouts, mpesaclient.ArrivedAtResultURL)
+}
+
+func (h *WalletHandler) B2CTimeout(payouts *service.MpesaPayoutService) gin.HandlerFunc {
+	return h.b2cCallback(payouts, mpesaclient.ArrivedAtTimeoutURL)
+}
+
+// B2CStatusResult is a third route, for the answers to questions the
+// reconciliation pass asked. A Transaction Status result is a different document
+// from a payout result, and the rule that separates them is load-bearing: a
+// non-zero result code here means the QUERY failed, not the payout. Handing both
+// to one handler would let a failed question look like a failed payout.
+func (h *WalletHandler) B2CStatusResult(payouts *service.MpesaPayoutService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+		if err == nil {
+			if err := payouts.HandleStatusResult(c.Request.Context(), body, mpesaclient.ArrivedAtResultURL); err != nil {
+				_ = c.Error(err)
+			}
+		} else {
+			_ = c.Error(err)
+		}
+		c.JSON(http.StatusOK, gin.H{"ResultCode": 0, "ResultDesc": "Accepted"})
+	}
+}
+
+func (h *WalletHandler) b2cCallback(payouts *service.MpesaPayoutService, arrival mpesaclient.PayoutArrival) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+		if err != nil {
+			_ = c.Error(err)
+			c.JSON(http.StatusOK, gin.H{"ResultCode": 0, "ResultDesc": "Accepted"})
+			return
+		}
+		if err := payouts.HandleResult(c.Request.Context(), body, arrival); err != nil {
 			_ = c.Error(err)
 		}
 		c.JSON(http.StatusOK, gin.H{"ResultCode": 0, "ResultDesc": "Accepted"})

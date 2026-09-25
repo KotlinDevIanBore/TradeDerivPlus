@@ -24,6 +24,7 @@ type Deps struct {
 	Auth    *service.AuthService
 	Admin   *service.AdminService
 	Mpesa   *service.MpesaService
+	Payouts *service.MpesaPayoutService
 	Handler struct {
 		Auth    *handlers.AuthHandler
 		Account *handlers.AccountHandler
@@ -52,8 +53,14 @@ func New(d Deps) *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	// mock_mpesa is here so a test script can refuse to run a deposit against an
+	// API wired to real Daraja credentials. A live STK push charges somebody real
+	// money, and the scripts that exercise deposits invent their phone numbers —
+	// so the only safe default is for them to fail closed when they cannot tell.
+	// It discloses nothing: on a real deployment the answer is false, which is
+	// what anyone would assume anyway.
 	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "mock_mpesa": d.Config.UseMockMpesa})
 	})
 
 	// Metrics are authenticated: the numbers here include deposit volumes and
@@ -75,6 +82,15 @@ func New(d Deps) *gin.Engine {
 	// Daraja posts here with no token of ours; it is verified by looking the
 	// CheckoutRequestID up against a request we actually made.
 	v1.POST("/mpesa/callback", d.Handler.Wallet.MpesaCallback(d.Mpesa))
+	// Payout callbacks. TWO routes, not one: which URL Daraja posted to is the
+	// only thing that separates "here is what happened" from "our queue gave up
+	// and nobody knows", and the second must never settle or refund anything.
+	// Both answer 200 always, like the deposit callback.
+	v1.POST("/mpesa/b2c/result", d.Handler.Wallet.B2CResult(d.Payouts))
+	v1.POST("/mpesa/b2c/timeout", d.Handler.Wallet.B2CTimeout(d.Payouts))
+	// And a third, for status-query answers: a different document from a payout
+	// result, whose non-zero codes mean the query failed rather than the payout.
+	v1.POST("/mpesa/b2c/status", d.Handler.Wallet.B2CStatusResult(d.Payouts))
 
 	protected := v1.Group("", middleware.Auth(d.Auth), middleware.RateLimit(rate.Limit(20), 60))
 	{
@@ -155,6 +171,7 @@ func New(d Deps) *gin.Engine {
 		admin.GET("/users", d.Handler.Admin.Users)
 		admin.GET("/users/:id", d.Handler.Admin.UserDetail)
 		admin.GET("/transactions", d.Handler.Admin.Transactions)
+		admin.GET("/payouts", d.Handler.Admin.Payouts)
 		admin.GET("/kyc", d.Handler.Admin.KYCQueue)
 		admin.GET("/audit-log", d.Handler.Admin.AuditLog)
 		admin.GET("/bot/runs", d.Handler.Admin.BotRuns)
@@ -166,6 +183,12 @@ func New(d Deps) *gin.Engine {
 		actions.POST("/accounts/:id/adjust", d.Handler.Admin.Adjust)
 		actions.POST("/kyc/:id/approve", d.Handler.Admin.ApproveKYC)
 		actions.POST("/kyc/:id/reject", d.Handler.Admin.RejectKYC)
+		// Settles a stuck deposit's original row, so a late callback credits
+		// nothing. With the money actions because it is one.
+		actions.POST("/deposits/:id/resolve", d.Handler.Admin.ResolveDeposit)
+		// Settles a stuck withdrawal's payout. With the money actions because it
+		// is one: two of its three outcomes return the customer's balance.
+		actions.POST("/payouts/:id/resolve", d.Handler.Admin.ResolvePayout)
 		// The kill switch belongs with the money actions: it stops every live run
 		// and turns the feature off, and it is audited like the rest.
 		actions.POST("/bot/kill", d.Handler.Admin.KillBots)

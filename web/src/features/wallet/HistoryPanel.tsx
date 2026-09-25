@@ -53,7 +53,13 @@ function DigitHistoryPanel() {
     return [...groups.entries()]
   }, [settled.data])
 
-  const canWithdraw = user?.kyc_status === 'verified'
+  // Both gates: the platform's and this user's. The platform's comes first in
+  // the hint, because it is the one they cannot do anything about.
+  const withdrawalsOn = user?.withdrawals_enabled !== false
+  const canWithdraw = withdrawalsOn && user?.kyc_status === 'verified'
+  const withdrawHint = !withdrawalsOn
+    ? 'Withdrawals are not available yet'
+    : 'Verify your identity to withdraw'
 
   return (
     <div>
@@ -66,7 +72,7 @@ function DigitHistoryPanel() {
         onDeposit={overlay.deposit}
         onWithdraw={overlay.withdraw}
         canWithdraw={canWithdraw}
-        withdrawHint="Verify your identity to withdraw"
+        withdrawHint={withdrawHint}
       />
 
       <section className="mt-4" aria-label="Settled digit contracts">
@@ -122,7 +128,13 @@ function CfdHistoryPanel() {
   const transactions = useTransactions(accountId, filter.types, 50)
   useRelativeTime()
 
-  const canWithdraw = user?.kyc_status === 'verified'
+  // Both gates: the platform's and this user's. The platform's comes first in
+  // the hint, because it is the one they cannot do anything about.
+  const withdrawalsOn = user?.withdrawals_enabled !== false
+  const canWithdraw = withdrawalsOn && user?.kyc_status === 'verified'
+  const withdrawHint = !withdrawalsOn
+    ? 'Withdrawals are not available yet'
+    : 'Verify your identity to withdraw'
 
   const { pending, rest } = useMemo(() => {
     const items = transactions.data?.items ?? []
@@ -143,7 +155,7 @@ function CfdHistoryPanel() {
         onDeposit={overlay.deposit}
         onWithdraw={overlay.withdraw}
         canWithdraw={canWithdraw}
-        withdrawHint="Verify your identity to withdraw"
+        withdrawHint={withdrawHint}
       />
 
       <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto">

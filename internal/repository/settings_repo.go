@@ -23,6 +23,14 @@ const (
 	// by code, so shipping to real money is a decision someone makes rather than
 	// a release someone cuts.
 	SettingBotRealMoneyEnabled = "bot_real_money_enabled"
+
+	// SettingWithdrawalsEnabled gates the withdrawal path. Seeded FALSE: a
+	// withdrawal debits the balance and waits on an M-Pesa payout that does not
+	// exist yet, so until one does, offering the feature is offering to take
+	// money and pay nobody. The only thing standing between a real customer and
+	// that today is that identity verification is admin-only and has no user
+	// flow — an accident, not a guard. This is the guard.
+	SettingWithdrawalsEnabled = "withdrawals_enabled"
 )
 
 // SettingsRepo is a small key/value store for runtime flags. The DB row is the

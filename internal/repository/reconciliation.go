@@ -22,8 +22,16 @@ import (
 //     the payout is requested, so the same funds cannot be spent twice while it
 //     is in flight. A pending withdrawal must count.
 //
-// A failed row never counts: a failed deposit was never credited, and a failed
-// withdrawal is refunded by a compensating row rather than by deleting this one.
+// A failed row never counts, and for a withdrawal that is the whole refund
+// mechanism rather than half of it. Flipping a withdrawal pending -> failed
+// removes it from this predicate, which by itself returns the amount to the
+// ledger total; the matching wallet credit in the same transaction is what keeps
+// the two sides equal. So a refund is exactly those two writes and NOT a third
+// compensating row — inserting one as well would credit the ledger twice and
+// raise the drift alarm this predicate feeds. See WalletService.FailWithdrawal,
+// which is the only place that pairing is performed, and
+// docs/investigation-reports/b2c-withdrawals-investigation.md §3.1 for the three
+// options and why this is the consistent one.
 const balanceAffectingRows = `(
 	status = 'completed'
 	OR (status = 'pending' AND type = 'withdrawal')

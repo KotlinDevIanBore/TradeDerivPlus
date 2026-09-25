@@ -3,6 +3,7 @@
 package service_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -204,9 +205,22 @@ func TestConcurrentOpensCannotOverspend(t *testing.T) {
 	h.assertReconciled(accountID)
 }
 
-// TestConcurrentWithdrawalsCannotOverdraw is the same race on the withdrawal
-// path, which debits up front rather than through the trading service.
-func TestConcurrentWithdrawalsCannotOverdraw(t *testing.T) {
+// TestConcurrentWithdrawalsYieldExactlyOnePending is the withdrawal path's
+// version of the same race, and what it asserts changed when the one-in-flight
+// constraint arrived (migration 0008).
+//
+// It used to assert that ten concurrent withdrawals of $100 against a $500
+// balance produced exactly five successes — the overdraw guard holding under
+// contention. That race is now unreachable: the partial unique index means an
+// account can have one pending withdrawal at a time, so ten concurrent attempts
+// produce one success and nine refusals, whatever the balance. Asserting five
+// would be asserting the absence of the constraint.
+//
+// The overdraw guard has not stopped mattering, it has stopped being reachable
+// from here, so it is asserted sequentially in the second half below — drain the
+// balance one withdrawal at a time, refunding between, and the account must
+// refuse the attempt that would take it negative rather than allow it.
+func TestConcurrentWithdrawalsYieldExactlyOnePending(t *testing.T) {
 	h := newHarness(t)
 	userID, accountID := h.newUser(decimal.Zero)
 
@@ -250,20 +264,72 @@ func TestConcurrentWithdrawalsCannotOverdraw(t *testing.T) {
 		switch {
 		case err == nil:
 			succeeded++
-		case err == service.ErrInsufficientFunds:
+		case errors.Is(err, service.ErrWithdrawalInFlight), errors.Is(err, service.ErrInsufficientFunds):
 		default:
 			t.Errorf("attempt %d got unexpected error: %v", i, err)
 		}
 	}
-	if succeeded != 5 {
-		t.Fatalf("%d withdrawals succeeded, want 5", succeeded)
+	if succeeded != 1 {
+		t.Fatalf("%d of %d concurrent withdrawals succeeded, want exactly 1 — the one-in-flight index is what makes a double-submitted payout impossible", succeeded, attempts)
 	}
 
 	w := h.wallet_(accountID)
-	if !w.RealBalance.IsZero() {
-		t.Fatalf("real balance %s after withdrawing it all, want 0", w.RealBalance)
+	if !w.RealBalance.Equal(decimal.NewFromInt(400)) {
+		t.Fatalf("real balance %s after one $100 withdrawal of $500, want 400 — it was debited more than once", w.RealBalance)
 	}
 	h.assertReconciled(accountID)
+
+	// The overdraw guard, sequentially, now that concurrency cannot reach it.
+	// Each round refunds the previous withdrawal so the index is free again, so
+	// the balance only falls when a withdrawal is left pending.
+	pending := h.pendingWithdrawalID(accountID)
+	for round := 0; round < 6; round++ {
+		if _, err := h.wallet.FailWithdrawal(h.ctx, pending, "test refund", service.WithdrawalFailedByAdmin); err != nil {
+			t.Fatalf("round %d refund: %v", round, err)
+		}
+		h.assertReconciled(accountID)
+
+		// Take the whole balance, then try to take $100 more.
+		balance := h.wallet_(accountID).RealBalance
+		tx, err := h.wallet.Withdraw(h.ctx, service.WithdrawInput{
+			UserID: userID, AccountID: accountID,
+			AmountUSD: balance, PhoneNumber: "0712345678",
+		})
+		if err != nil {
+			t.Fatalf("round %d withdrawing the full balance %s: %v", round, balance, err)
+		}
+		if w := h.wallet_(accountID); !w.RealBalance.IsZero() {
+			t.Fatalf("round %d: real balance %s after withdrawing all of it", round, w.RealBalance)
+		}
+		h.assertReconciled(accountID)
+
+		// Refund it and try to take more than there is.
+		if _, err := h.wallet.FailWithdrawal(h.ctx, tx.ID, "test refund", service.WithdrawalFailedByAdmin); err != nil {
+			t.Fatal(err)
+		}
+		over := h.wallet_(accountID).RealBalance.Add(decimal.NewFromInt(1))
+		if _, err := h.wallet.Withdraw(h.ctx, service.WithdrawInput{
+			UserID: userID, AccountID: accountID,
+			AmountUSD: over, PhoneNumber: "0712345678",
+		}); !errors.Is(err, service.ErrInsufficientFunds) {
+			t.Fatalf("round %d: withdrawing %s of a %s balance returned %v, want ErrInsufficientFunds",
+				round, over, h.wallet_(accountID).RealBalance, err)
+		}
+		if w := h.wallet_(accountID); w.RealBalance.IsNegative() {
+			t.Fatalf("round %d: real balance went negative: %s", round, w.RealBalance)
+		}
+		h.assertReconciled(accountID)
+
+		// Leave one pending for the next round's refund.
+		next, err := h.wallet.Withdraw(h.ctx, service.WithdrawInput{
+			UserID: userID, AccountID: accountID,
+			AmountUSD: decimal.NewFromInt(1), PhoneNumber: "0712345678",
+		})
+		if err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+		pending = next.ID
+	}
 }
 
 // TestFreezeRacesOpen is the race the freeze check exists to win. A freeze

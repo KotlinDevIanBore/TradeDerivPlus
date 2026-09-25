@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   Users as UsersIcon,
   type LucideIcon,
+  Send,
 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { cn } from '@/lib/cn'
@@ -49,6 +50,15 @@ export function AdminShell() {
     refetchInterval: 60_000,
   })
 
+  // And the payouts nobody has an answer for. This one is a nag on purpose: each
+  // row is a customer whose balance was debited with nothing known either way.
+  const openPayouts = useQuery({
+    queryKey: adminKeys.payouts({ filter: 'open', page: 1 }),
+    queryFn: () => adminApi.payouts({ filter: 'open' }),
+    enabled: Boolean(accessToken) && !passwordChangeRequired,
+    refetchInterval: 60_000,
+  })
+
   // A session still on the default password can do exactly one thing.
   useEffect(() => {
     if (passwordChangeRequired && location.pathname !== '/admin/change-password') {
@@ -66,6 +76,7 @@ export function AdminShell() {
     { to: '/admin/users', label: 'Users', icon: UsersIcon },
     { to: '/admin/transactions', label: 'Transactions', icon: Receipt },
     { to: '/admin/kyc', label: 'KYC queue', icon: ShieldCheck, badge: kyc.data?.total },
+    { to: '/admin/payouts', label: 'Payouts', icon: Send, badge: openPayouts.data?.total },
     { to: '/admin/bot-runs', label: 'Auto runs', icon: Bot },
     { to: '/admin/audit-log', label: 'Audit log', icon: ClipboardList },
   ]
