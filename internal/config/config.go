@@ -109,6 +109,12 @@ type Config struct {
 	MaxDepositKES       float64
 	DemoStartingBalance float64
 
+	// PublicAPIURL is this API's own externally reachable base, used ONLY to build
+	// upload URLs for the in-memory document stub. Real R2 presigned URLs point at
+	// Cloudflare and never at us, so this is unused whenever a bucket is
+	// configured.
+	PublicAPIURL string
+
 	// Object storage for KYC documents (Cloudflare R2, S3-compatible).
 	//
 	// All five may be absent: a deployment that does not take verification
@@ -242,6 +248,8 @@ func Load() (*Config, error) {
 		MpesaB2CResultURL:       getEnv("MPESA_B2C_RESULT_URL", ""),
 		MpesaB2CTimeoutURL:      getEnv("MPESA_B2C_TIMEOUT_URL", ""),
 		MpesaB2CStatusResultURL: getEnv("MPESA_B2C_STATUS_RESULT_URL", ""),
+
+		PublicAPIURL: getEnv("PUBLIC_API_URL", "http://localhost:8080/api/v1"),
 
 		R2AccountID:       getEnv("R2_ACCOUNT_ID", ""),
 		R2AccessKeyID:     getEnv("R2_ACCESS_KEY_ID", ""),

@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 )
 
 // KYCHandler is the user-facing side of identity verification: ask for somewhere
@@ -88,4 +91,48 @@ func (h *KYCHandler) State(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, state)
+}
+
+// StubUpload receives a document upload when no object store is configured.
+//
+// It exists so the whole verification flow — including the browser's PUT to a
+// signed URL — works in local development, CI and the browser suite with no
+// bucket and no credentials, which is what makes the stub honest rather than a
+// thing only Go tests can reach.
+//
+// It is registered ONLY when the store is the in-memory stub (see routes.go), so
+// a deployment with R2 configured does not have this route at all. It is
+// unauthenticated for the same reason a real presigned URL is: the signature is
+// the credential, and the stub checks it — an unsigned key, an expired URL, or a
+// type or length that does not match what was signed are all refused.
+func StubUploadHandler(stub *storage.Stub, maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := strings.TrimPrefix(c.Param("key"), "/")
+		if key == "" {
+			badRequest(c, "Missing object key", "")
+			return
+		}
+		// Bounded read: this is the one place in this API where a request body can
+		// be a document rather than a small JSON object.
+		body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+1))
+		if err != nil {
+			badRequest(c, "Could not read the upload", "")
+			return
+		}
+		if int64(len(body)) > maxBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": gin.H{
+				"message": "That file is too large", "code": "too_large",
+			}})
+			return
+		}
+		if err := stub.AcceptUpload(key, c.GetHeader("Content-Type"), body); err != nil {
+			// The same 403 a real store answers with when a signature does not
+			// match what was presented.
+			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+				"message": err.Error(), "code": "signature_mismatch",
+			}})
+			return
+		}
+		c.Status(http.StatusOK)
+	}
 }

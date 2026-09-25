@@ -11,8 +11,9 @@ import { toast } from '@/components/ui/Toast'
 import { queryKeys } from '@/lib/queryKeys'
 import { kes, money } from '@/lib/format'
 import { dec } from '@/lib/money'
-import { useRate } from '@/hooks/useQueries'
+import { useKYCState, useRate } from '@/hooks/useQueries'
 import { useSessionStore } from '@/store/session'
+import { VerificationSheet } from '@/features/kyc/VerificationSheet'
 import type { Account, Wallet } from '@/types'
 
 /**
@@ -38,6 +39,8 @@ export function WithdrawSheet({
   const [amount, setAmount] = useState('')
   const [phone, setPhone] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const kycState = useKYCState()
 
   useEffect(() => {
     if (open && user?.phone_number) setPhone(user.phone_number.replace(/^254/, ''))
@@ -101,20 +104,46 @@ export function WithdrawSheet({
   }
 
   if (user && user.kyc_status !== 'verified') {
+    // Under review: there is nothing to do but wait, so offer no control that
+    // would only be refused.
+    const underReview = user.kyc_status === 'pending'
+    const unfinished = kycState.data?.unfinished_upload ?? false
     return (
-      <Sheet open={open} onOpenChange={onOpenChange} title="Verification required">
-        <div className="py-2 text-center">
-          <ShieldAlert className="mx-auto h-12 w-12 text-warning" aria-hidden />
-          <p className="mt-4 text-body text-text">Verify your identity to withdraw</p>
-          <p className="mx-auto mt-2 max-w-[34ch] text-meta text-muted">
-            We need to confirm who you are before sending money out. This protects your account.
-          </p>
-          <Button block className="mt-6" disabled>
-            Start verification
-          </Button>
-          <p className="mt-2 text-meta text-faint">Verification is not available yet.</p>
-        </div>
-      </Sheet>
+      <>
+        <Sheet open={open && !verifying} onOpenChange={onOpenChange} title="Verification required">
+          <div className="py-2 text-center">
+            <ShieldAlert className="mx-auto h-12 w-12 text-warning" aria-hidden />
+            <p className="mt-4 text-body text-text">
+              {underReview ? 'Your documents are with us' : 'Verify your identity to withdraw'}
+            </p>
+            <p className="mx-auto mt-2 max-w-[34ch] text-meta text-muted">
+              {underReview
+                ? 'Someone will review them and we will let you know. Withdrawals open once you are verified.'
+                : 'We need to confirm who you are before sending money out. This protects your account.'}
+            </p>
+            {underReview ? (
+              <Button variant="outline" block className="mt-6" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            ) : (
+              <Button block className="mt-6" onClick={() => setVerifying(true)}>
+                {unfinished ? 'Continue verification' : 'Start verification'}
+              </Button>
+            )}
+          </div>
+        </Sheet>
+        <VerificationSheet
+          open={verifying}
+          onOpenChange={(next) => {
+            setVerifying(next)
+            // Closing the verification sheet closes the withdraw flow with it:
+            // the gate's answer has not changed yet, and dropping the user back
+            // onto "Verify your identity" reads as though nothing happened.
+            if (!next) onOpenChange(false)
+          }}
+          continuing={unfinished}
+        />
+      </>
     )
   }
 

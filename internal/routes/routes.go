@@ -15,6 +15,7 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/observability"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 )
 
 // Deps is everything the router needs. main builds it; routes only wires it.
@@ -37,6 +38,10 @@ type Deps struct {
 		Admin   *handlers.AdminHandler
 		KYC     *handlers.KYCHandler
 	}
+	// DocumentStub is set only when no object store is configured. Its presence is
+	// what registers the development upload route, so a deployment with a real
+	// bucket does not have that route at all.
+	DocumentStub *storage.Stub
 }
 
 func New(d Deps) *gin.Engine {
@@ -92,6 +97,15 @@ func New(d Deps) *gin.Engine {
 	// And a third, for status-query answers: a different document from a payout
 	// result, whose non-zero codes mean the query failed rather than the payout.
 	v1.POST("/mpesa/b2c/status", d.Handler.Wallet.B2CStatusResult(d.Payouts))
+
+	// Development only. Registered when there is no object store, so the browser
+	// can complete a real upload round trip against the in-memory stub. Public for
+	// the same reason a presigned URL is: the signature is the credential, and the
+	// stub verifies it.
+	if d.DocumentStub != nil {
+		v1.PUT("/kyc/stub-upload/*key",
+			handlers.StubUploadHandler(d.DocumentStub, d.Config.KYCMaxDocumentBytes))
+	}
 
 	protected := v1.Group("", middleware.Auth(d.Auth), middleware.RateLimit(rate.Limit(20), 60))
 	{

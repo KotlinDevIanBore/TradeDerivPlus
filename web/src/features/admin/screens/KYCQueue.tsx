@@ -5,6 +5,8 @@ import { CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Sheet } from '@/components/ui/Sheet'
 import { toast } from '@/components/ui/Toast'
+import { ApiError } from '@/api/client'
+import { humanMessage } from '@/components/ErrorState'
 import { relativeTime } from '@/lib/format'
 import { adminApi, adminKeys } from '../adminApi'
 import { AdminPageHeader } from '../AdminShell'
@@ -22,6 +24,28 @@ export function AdminKYCQueue() {
 
   const [approving, setApproving] = useState<KYCSubmission | null>(null)
   const [rejecting, setRejecting] = useState<KYCSubmission | null>(null)
+  const [openingDoc, setOpeningDoc] = useState<string | null>(null)
+
+  /**
+   * Fetch a fresh signed URL and open it.
+   *
+   * Opened in a new tab rather than embedded, which keeps a PDF working the same
+   * way an image does. The URL is never stored: it expires in minutes, and each
+   * view is a separate audited request, so a second look is a second record.
+   */
+  async function openDocument(submissionID: string) {
+    setOpeningDoc(submissionID)
+    try {
+      const { url } = await adminApi.kycDocumentURL(submissionID)
+      window.open(url, '_blank', 'noopener,noreferrer')
+      // The view wrote an audit row, so anything showing the log is now stale.
+      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] })
+    } catch (e) {
+      toast.error(e instanceof ApiError ? humanMessage(e) : 'Could not open that document')
+    } finally {
+      setOpeningDoc(null)
+    }
+  }
 
   const query = useQuery({
     queryKey: adminKeys.kyc(status, page),
@@ -73,16 +97,27 @@ export function AdminKYCQueue() {
       key: 'document',
       header: 'Document',
       render: (k) =>
-        // A key is not a URL and must never be rendered as a link. Viewing is a
-        // separate request that mints a short-lived signed URL and audits the
-        // view; that control arrives with the upload flow. Until then the key is
-        // shown as the opaque string it is.
+        // Never a stored link. A key is not a URL, and the URL that can open it
+        // is minted per click, lives minutes, and writes an audit row — so the
+        // cell is a button, not an anchor.
         k.document_key ? (
-          <span className="font-mono text-meta text-muted" title={k.document_key}>
-            {k.document_key.length > 24 ? `${k.document_key.slice(0, 24)}…` : k.document_key}
-          </span>
+          <button
+            type="button"
+            disabled={openingDoc === k.id}
+            onClick={(e) => {
+              e.stopPropagation()
+              void openDocument(k.id)
+            }}
+            className="text-accent hover:underline disabled:text-faint"
+          >
+            {openingDoc === k.id ? 'Opening…' : 'View'}
+          </button>
         ) : (
-          <span className="italic text-faint">None</span>
+          // Either retention deleted it or it never arrived. Saying so beats a
+          // control that opens nothing.
+          <span className="italic text-faint" title="No document stored">
+            None
+          </span>
         ),
     },
     { key: 'status', header: 'Status', render: (k) => <KYCBadge status={k.status} /> },

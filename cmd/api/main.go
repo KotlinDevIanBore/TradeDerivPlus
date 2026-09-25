@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -124,6 +125,7 @@ func run() error {
 	// being present rather than on a separate boolean, because there is no reason
 	// to run a stub against a configured bucket.
 	var docs service.DocumentStore
+	var documentStub *storage.Stub
 	if cfg.R2AccountID != "" {
 		r2, err := storage.New(storage.Config{
 			AccountID:       cfg.R2AccountID,
@@ -138,8 +140,14 @@ func run() error {
 		docs = r2
 		log.Info("object storage ready", "bucket", cfg.R2BucketName)
 	} else {
-		docs = storage.NewStub()
-		log.Warn("object storage not configured: KYC documents use an in-memory stub and do not persist")
+		stub := storage.NewStub()
+		// Point the stub's presigned URLs at this API's own development upload
+		// route, so a browser can complete the real three-step flow with no bucket.
+		stub.BaseURL = strings.TrimSuffix(cfg.PublicAPIURL, "/") + storage.StubUploadPath
+		docs = stub
+		documentStub = stub
+		log.Warn("object storage not configured: KYC documents use an in-memory stub and do not persist",
+			"upload_route", stub.BaseURL)
 	}
 	kyc := service.NewKYCService(store, docs, cfg, log)
 	// The console asks the KYC service for a document URL rather than reaching into
@@ -203,7 +211,8 @@ func run() error {
 	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount, cfg.MpesaReconcileMinAge), log, time.Minute)
 
 	// --- HTTP ---------------------------------------------------------------
-	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts}
+	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts,
+		DocumentStub: documentStub}
 	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)

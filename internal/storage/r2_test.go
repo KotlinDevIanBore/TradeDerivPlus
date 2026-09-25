@@ -176,20 +176,20 @@ func TestStubEnforcesWhatTheSignatureCovers(t *testing.T) {
 	ctx := context.Background()
 	const key = "kyc/u/d.jpg"
 
-	if err := s.PutForTest(key, "image/jpeg", []byte("abc")); err == nil {
+	if err := s.AcceptUpload(key, "image/jpeg", []byte("abc")); err == nil {
 		t.Fatal("the stub accepted an upload to a key nothing had signed")
 	}
 
 	if _, err := s.PresignPut(ctx, key, "image/jpeg", 3, time.Minute); err != nil {
 		t.Fatalf("presign: %v", err)
 	}
-	if err := s.PutForTest(key, "application/pdf", []byte("abc")); err == nil {
+	if err := s.AcceptUpload(key, "application/pdf", []byte("abc")); err == nil {
 		t.Fatal("the stub accepted a content type the signature did not cover")
 	}
-	if err := s.PutForTest(key, "image/jpeg", []byte("abcd")); err == nil {
+	if err := s.AcceptUpload(key, "image/jpeg", []byte("abcd")); err == nil {
 		t.Fatal("the stub accepted a length the signature did not cover")
 	}
-	if err := s.PutForTest(key, "image/jpeg", []byte("abc")); err != nil {
+	if err := s.AcceptUpload(key, "image/jpeg", []byte("abc")); err != nil {
 		t.Fatalf("a matching upload was refused: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestStubPresignPutExpiryIsEnforced(t *testing.T) {
 	if _, err := s.PresignPut(context.Background(), key, "image/png", 1, -time.Second); err != nil {
 		t.Fatalf("presign: %v", err)
 	}
-	if err := s.PutForTest(key, "image/png", []byte("x")); err == nil {
+	if err := s.AcceptUpload(key, "image/png", []byte("x")); err == nil {
 		t.Fatal("the stub accepted an upload against an expired URL")
 	}
 }

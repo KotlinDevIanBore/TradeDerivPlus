@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { LogOut, ShieldCheck } from 'lucide-react'
 import { AccountPill } from '@/components/AccountPill'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -6,7 +7,8 @@ import { Card, CardTitle } from '@/components/ui/Card'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { useActiveAccount } from '@/features/shell/useActiveAccount'
 import { useLogout } from '@/hooks/useAuth'
-import { useMe } from '@/hooks/useQueries'
+import { useKYCState, useMe } from '@/hooks/useQueries'
+import { VerificationSheet } from '@/features/kyc/VerificationSheet'
 
 const kycCopy: Record<string, string> = {
   unverified: 'Verify your identity to enable withdrawals.',
@@ -31,6 +33,9 @@ export function AccountPanel() {
 
   const user = me.data
   const kyc = user?.kyc_status ?? 'unverified'
+  const kycState = useKYCState()
+  const unfinished = kycState.data?.unfinished_upload ?? false
+  const [verifying, setVerifying] = useState(false)
 
   return (
     <div className="space-y-3 py-2">
@@ -55,17 +60,34 @@ export function AccountPanel() {
             <CardTitle>Identity verification</CardTitle>
             <p className="mt-1 max-w-[40ch] text-meta text-muted">{kycCopy[kyc]}</p>
           </div>
-          <StatusBadge status={kyc === 'verified' ? 'completed' : kyc === 'rejected' ? 'failed' : 'pending'} />
+          {/* Four states, four badges. Mapping 'unverified' onto 'pending' would
+              tell a user who has submitted nothing that we are reviewing
+              something, which is the one thing this badge must not say. */}
+          <StatusBadge
+            status={
+              kyc === 'verified'
+                ? 'completed'
+                : kyc === 'rejected'
+                  ? 'failed'
+                  : kyc === 'pending'
+                    ? 'pending'
+                    : 'unverified'
+            }
+          />
         </div>
 
-        {kyc !== 'verified' ? (
-          <Button variant="outline" block className="mt-4" disabled>
+        {/* Under review there is nothing to press: the control would only be
+            refused, and offering it would suggest the document had not arrived. */}
+        {kyc !== 'verified' && kyc !== 'pending' ? (
+          <Button variant="outline" block className="mt-4" onClick={() => setVerifying(true)}>
             <ShieldCheck className="h-4 w-4" aria-hidden />
-            Start verification
+            {unfinished ? 'Continue verification' : 'Start verification'}
           </Button>
         ) : null}
-        {kyc !== 'verified' ? (
-          <p className="mt-2 text-meta text-faint">Verification is not available yet.</p>
+        {unfinished && kyc !== 'verified' && kyc !== 'pending' ? (
+          <p className="mt-2 text-meta text-faint">
+            You didn't finish verification — continue where you left off.
+          </p>
         ) : null}
       </Card>
 
@@ -92,6 +114,8 @@ export function AccountPanel() {
         <LogOut className="h-4 w-4" aria-hidden />
         Log out
       </Button>
+
+      <VerificationSheet open={verifying} onOpenChange={setVerifying} continuing={unfinished} />
     </div>
   )
 }

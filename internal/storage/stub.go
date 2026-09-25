@@ -23,8 +23,10 @@ type Stub struct {
 	mu      sync.Mutex
 	objects map[string]stubObject
 	signed  map[string]stubSignature
-	// BaseURL is where presigned URLs appear to point. Tests can read it back to
-	// recognise a stub URL.
+	// BaseURL is where presigned URLs point. In tests it is unreachable and
+	// AcceptUpload is called directly; when the API registers the development
+	// upload route it is set to that route, so a browser can complete a real
+	// round trip with no bucket.
 	BaseURL string
 }
 
@@ -39,11 +41,15 @@ type stubSignature struct {
 	expiresAt     time.Time
 }
 
+// StubUploadPath is the route the development upload route is mounted at, and the
+// path stub presigned URLs point to.
+const StubUploadPath = "/kyc/stub-upload/"
+
 func NewStub() *Stub {
 	return &Stub{
 		objects: map[string]stubObject{},
 		signed:  map[string]stubSignature{},
-		BaseURL: "https://stub.invalid/kyc",
+		BaseURL: "http://localhost:8080/api/v1" + StubUploadPath,
 	}
 }
 
@@ -53,7 +59,7 @@ func (s *Stub) PresignPut(_ context.Context, key, contentType string, contentLen
 	expires := time.Now().Add(expiry)
 	s.signed[key] = stubSignature{contentType: contentType, contentLength: contentLength, expiresAt: expires}
 	return &PresignedRequest{
-		URL:       fmt.Sprintf("%s/%s?stub-signature=put", s.BaseURL, url.PathEscape(key)),
+		URL:       s.BaseURL + url.PathEscape(key) + "?stub-signature=put",
 		Method:    "PUT",
 		Headers:   http.Header{"Content-Type": {contentType}, "Content-Length": {fmt.Sprint(contentLength)}},
 		ExpiresAt: expires,
@@ -65,7 +71,7 @@ func (s *Stub) PresignGet(_ context.Context, key, disposition string, expiry tim
 	if disposition != "" {
 		q.Set("response-content-disposition", disposition)
 	}
-	return fmt.Sprintf("%s/%s?%s", s.BaseURL, url.PathEscape(key), q.Encode()), nil
+	return s.BaseURL + url.PathEscape(key) + "?" + q.Encode(), nil
 }
 
 func (s *Stub) Head(_ context.Context, key string) (*ObjectMetadata, error) {
@@ -101,13 +107,13 @@ func (s *Stub) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-// PutForTest stands in for the browser's PUT to the signed URL.
+// AcceptUpload stands in for the object store receiving a PUT at a signed URL.
 //
-// It enforces what the real store's signature enforces, so a test cannot upload
-// bytes the signature would have refused: an unsigned key, an expired URL, a
-// different content type, or a different length. Without these the stub would be
-// a way to prove the wrong thing.
-func (s *Stub) PutForTest(key, contentType string, body []byte) error {
+// It enforces what a real signature enforces, so neither a test nor the
+// development upload route can store bytes the real store would have refused: an
+// unsigned key, an expired URL, a different content type, or a different length.
+// Without these the stub would be a way to prove the wrong thing.
+func (s *Stub) AcceptUpload(key, contentType string, body []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sig, ok := s.signed[key]

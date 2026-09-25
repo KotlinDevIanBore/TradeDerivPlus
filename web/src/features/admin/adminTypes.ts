@@ -132,6 +132,7 @@ export type AuditAction =
   | 'manual_adjustment'
   | 'kyc_approve'
   | 'kyc_reject'
+  | 'kyc_document_view'
   | 'bot_kill'
   | 'bot_enable'
   | 'bot_run_stop'

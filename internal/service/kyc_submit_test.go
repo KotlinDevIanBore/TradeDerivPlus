@@ -27,7 +27,7 @@ func uploaded(t *testing.T, h *harness, userID uuid.UUID, contentType string, bo
 	if err != nil {
 		t.Fatalf("presign: %v", err)
 	}
-	if err := h.docs.PutForTest(target.ObjectKey, contentType, body); err != nil {
+	if err := h.docs.AcceptUpload(target.ObjectKey, contentType, body); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	return target.AttemptID, target.ObjectKey

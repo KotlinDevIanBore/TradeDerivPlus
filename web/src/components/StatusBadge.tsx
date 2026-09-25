@@ -12,6 +12,9 @@ const styles: Record<string, string> = {
   running: 'border-profit/40 text-profit',
   stopping: 'border-warning/40 text-warning',
   stopped: 'border-border text-faint',
+  // Identity verification. 'unverified' is neutral rather than warning-coloured:
+  // nothing is wrong, nothing has been started.
+  unverified: 'border-border text-faint',
 }
 
 const labels: Record<string, string> = {
@@ -23,6 +26,7 @@ const labels: Record<string, string> = {
   running: 'Running',
   stopping: 'Stopping',
   stopped: 'Stopped',
+  unverified: 'Not started',
 }
 
 export function StatusBadge({ status, className }: { status: TxStatus | string; className?: string }) {
