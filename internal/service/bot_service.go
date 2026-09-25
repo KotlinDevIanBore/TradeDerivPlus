@@ -706,8 +706,7 @@ func (s *BotService) loop(run *models.BotRun, live *liveRun) {
 		current, err := s.store.BotRuns.Get(s.rootCtx, runID)
 		if err != nil {
 			s.log.Error("bot run read failed", "run", runID, "err", err)
-			msg := err.Error()
-			s.finalise(runID, live, models.BotStopError, &msg)
+			s.finaliseFailure(runID, live, err)
 			return
 		}
 
@@ -783,8 +782,7 @@ func (s *BotService) loop(run *models.BotRun, live *liveRun) {
 			// lost the reply, and retrying that is how a sequential loop places
 			// twice. Stopping is the safe reading of an ambiguous outcome.
 			s.log.Error("bot placement failed", "run", runID, "err", err)
-			msg := err.Error()
-			s.finalise(runID, live, models.BotStopError, &msg)
+			s.finaliseFailure(runID, live, err)
 			return
 		}
 
@@ -807,8 +805,7 @@ func (s *BotService) loop(run *models.BotRun, live *liveRun) {
 		}
 		after, err := s.store.BotRuns.Get(s.rootCtx, runID)
 		if err != nil {
-			msg := err.Error()
-			s.finalise(runID, live, models.BotStopError, &msg)
+			s.finaliseFailure(runID, live, err)
 			return
 		}
 		s.broadcast(live.userID, after)
@@ -978,6 +975,37 @@ func (s *BotService) awaitRunSettled(runID uuid.UUID, live *liveRun) {
 }
 
 // finalise writes the run's ending exactly once and tells the user.
+// finaliseFailure records a run that ended because an operation failed, and
+// decides whether that failure was a fault at all.
+//
+// A cancelled root context is not a fault: it means the process is shutting
+// down. Every caller below already consults externalStop before the operation
+// for exactly that reason, but that is a check-then-act pair — the cancel can
+// land in the window between the check passing and the operation running, and
+// then the operation fails with "context canceled" and the run is recorded as
+// having died of an error. The reason is operator-visible, so that reads as a
+// fault where there was none, and it is what made TestBotShutdownFinalisesRun
+// fail under CI's timing while passing locally.
+//
+// Asking the root context rather than inspecting the error keeps this aligned
+// with externalStop's own test: the question is "are we shutting down", not
+// "did this particular error happen to mention cancellation".
+func (s *BotService) finaliseFailure(runID uuid.UUID, live *liveRun, err error) {
+	reason, lastError := failureReason(s.rootCtx.Err() != nil, err)
+	s.finalise(runID, live, reason, lastError)
+}
+
+// failureReason is finaliseFailure's decision, separated from its write so it can
+// be tested without a database. The bug it fixes was entirely in this decision,
+// and the write was never in question.
+func failureReason(shuttingDown bool, err error) (string, *string) {
+	if shuttingDown {
+		return models.BotStopShutdown, nil
+	}
+	msg := err.Error()
+	return models.BotStopError, &msg
+}
+
 func (s *BotService) finalise(runID uuid.UUID, live *liveRun, reason string, lastError *string) {
 	// During shutdown the root context is already cancelled, so a write on it
 	// would fail silently and leave the row live forever. onTick has the same
