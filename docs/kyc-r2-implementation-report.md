@@ -241,6 +241,23 @@ presign-then-audit-then-return ordering exists to close. With
 - Route registration and auth: all three user routes and the admin route answer
   401 anonymously, not 404.
 
+### One CI failure that was not mine, and how I treated it
+
+`TestBotKillSwitchStopsAllRuns` failed once in CI on this branch —
+`ending broadcast 0 times, want 1`. It passed on re-run, and 8/8 locally.
+
+Stating the uncertainty plainly rather than declaring it unrelated: this branch
+touches no bot code, and PR #12 on the same base passed. **But it adds 42 tests
+to the same integration suite, which changes how loaded that suite is**, and this
+assertion counts broadcasts — the same shape as the shutdown race fixed earlier
+today, which was also a real defect that only CI's timing exposed. So "unrelated
+to KYC" is well supported; "definitely a flake" is not, on one occurrence and one
+green re-run. That is precisely the inference that was wrong about the shutdown
+race.
+
+It is worth watching on the next few runs. If it recurs, the bot's broadcast
+bookkeeping under load is the place to look, not this feature.
+
 ---
 
 ## 5. Left undone
