@@ -171,7 +171,8 @@ upload; and the sweep cleans unconsumed attempts older than 48 hours.
 | 4 | **`unverified` got its own badge** | Found in the browser: an unverified user's badge read "Pending", because the badge mapped everything non-verified and non-rejected onto `pending`. Now that the two are distinct, that told a user who had submitted nothing that we were reviewing something. |
 | 5 | **`CHECK` constraints taken** | The plan left these optional and asked for an explicit answer. Taken. |
 | 6 | **Repository tests live in `internal/service`** | The plan implied repository-level tests; `internal/repository` has no harness and building a second one to reach three functions was not worth it. The service harness already exposes `store` and `pool`. |
-| 7 | **`cmd/seed` writes no document key** | The plan said the placeholder "follows Stage 6". What it became: nothing at all. The seed process has its own in-memory stub, separate from the API's, so any key it wrote would name an object the console could never fetch — a View button that always failed. Empty renders as "None", which is true. |
+| 7 | **`scripts/smoke.py` needed updating** | Not in the plan's file list, and missed until CI caught it. `smoke.py:126` asserted a freshly-registered user reads `kyc_status == "pending"`; D9's new default made that `"unverified"`. The assertion now states what the value means rather than just matching it. A genuine consequence of the schema change that the plan's file survey did not anticipate. |
+| 8 | **`cmd/seed` writes no document key** | The plan said the placeholder "follows Stage 6". What it became: nothing at all. The seed process has its own in-memory stub, separate from the API's, so any key it wrote would name an object the console could never fetch — a View button that always failed. Empty renders as "None", which is true. |
 
 ---
 

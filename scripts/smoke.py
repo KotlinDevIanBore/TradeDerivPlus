@@ -123,7 +123,11 @@ check("refresh without the cookie is refused", nocookie.get("error", {}).get("co
 COOKIES.update(saved_cookies)
 
 _, me = call("GET", "/auth/me", expect=200)
-check("me returns the profile", me["kyc_status"] == "pending")
+# "unverified", not "pending": a user who has submitted nothing is now recorded
+# distinctly from one whose documents are awaiting review. Before self-serve
+# upload existed the two were the same value, which made the review queue's
+# meaning ambiguous.
+check("me returns the profile", me["kyc_status"] == "unverified")
 
 # --- Accounts and wallet ---------------------------------------------------
 print("\nACCOUNTS")
