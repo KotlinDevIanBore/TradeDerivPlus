@@ -61,6 +61,22 @@ type Config struct {
 	MpesaCallbackURL    string
 	UseMockMpesa        bool
 
+	// Payouts (B2C). These authenticate as an "API user" created on the M-PESA
+	// organisation portal, not with the STK passkey.
+	//
+	// MpesaSecurityCredential is the initiator's password ALREADY encrypted under
+	// Safaricom's certificate — generate it once with `go run ./cmd/gencred` and
+	// set the result here. The server deliberately never holds the plaintext
+	// password and never reads a certificate.
+	//
+	// The two callback URLs must differ. A queue timeout means "we do not know",
+	// and one handler for both channels cannot tell that from a failure — which
+	// would refund customers who were in fact paid. Load refuses them equal.
+	MpesaInitiatorName      string
+	MpesaSecurityCredential string
+	MpesaB2CResultURL       string
+	MpesaB2CTimeoutURL      string
+
 	// STK reconciliation: the pass that asks Daraja about deposits whose
 	// callback has not arrived. The numbers are PROVISIONAL — guesses at what
 	// Daraja tolerates, to be replaced once scripts/daraja_probe.py has been run
@@ -166,6 +182,11 @@ func Load() (*Config, error) {
 		MpesaCallbackURL:    getEnv("MPESA_CALLBACK_URL", "http://localhost:8080/api/v1/mpesa/callback"),
 		UseMockMpesa:        getBool("USE_MOCK_MPESA", true),
 
+		MpesaInitiatorName:      getEnv("MPESA_INITIATOR_NAME", ""),
+		MpesaSecurityCredential: getEnv("MPESA_SECURITY_CREDENTIAL", ""),
+		MpesaB2CResultURL:       getEnv("MPESA_B2C_RESULT_URL", ""),
+		MpesaB2CTimeoutURL:      getEnv("MPESA_B2C_TIMEOUT_URL", ""),
+
 		MpesaReconcileEvery:  getDuration("MPESA_RECONCILE_EVERY", time.Minute),
 		MpesaReconcileMinAge: getDuration("MPESA_RECONCILE_MIN_AGE", 3*time.Minute),
 		MpesaReconcileGiveUp: getDuration("MPESA_RECONCILE_GIVE_UP", 24*time.Hour),
@@ -217,6 +238,22 @@ func Load() (*Config, error) {
 	}
 	if !c.UseMockMpesa && (c.MpesaConsumerKey == "" || c.MpesaPasskey == "") {
 		return nil, fmt.Errorf("MPESA_CONSUMER_KEY and MPESA_PASSKEY required when USE_MOCK_MPESA=false")
+	}
+	// Payout configuration is validated when any of it is present, so a partial
+	// or collapsed setup fails at boot rather than at the first withdrawal. It is
+	// allowed to be entirely absent: a deployment that only takes deposits needs
+	// none of it, and withdrawals_enabled is off by default.
+	if c.MpesaInitiatorName != "" || c.MpesaSecurityCredential != "" ||
+		c.MpesaB2CResultURL != "" || c.MpesaB2CTimeoutURL != "" {
+		if c.MpesaInitiatorName == "" || c.MpesaSecurityCredential == "" ||
+			c.MpesaB2CResultURL == "" || c.MpesaB2CTimeoutURL == "" {
+			return nil, fmt.Errorf("payouts need all of MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, " +
+				"MPESA_B2C_RESULT_URL and MPESA_B2C_TIMEOUT_URL, or none of them")
+		}
+		if c.MpesaB2CResultURL == c.MpesaB2CTimeoutURL {
+			return nil, fmt.Errorf("MPESA_B2C_RESULT_URL and MPESA_B2C_TIMEOUT_URL must differ: " +
+				"a queue timeout means 'we do not know', and one handler for both cannot tell it from a failure")
+		}
 	}
 	if c.MaxWithdrawKES <= 0 || c.MaxWithdrawDayKES <= 0 {
 		return nil, fmt.Errorf("MAX_WITHDRAW_KES and MAX_WITHDRAW_DAY_KES must be positive")

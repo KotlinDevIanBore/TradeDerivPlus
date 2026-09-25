@@ -90,6 +90,17 @@ func run() error {
 	auth := service.NewAuthService(store, cfg)
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, hub, cfg, log)
+	payouts := service.NewMpesaPayoutService(store, cfg, log)
+	// Both directions at once: the wallet asks payouts to send, and payouts
+	// reports outcomes back to the wallet, which is the only thing that moves
+	// money. Wiring one without the other would leave a payout able to win its
+	// guard with nowhere to send the result.
+	wallet.SetPayouts(payouts)
+	// A collapsed or half-configured payout setup is a failed boot, not a failed
+	// withdrawal. Mock mode has nothing to validate.
+	if err := payouts.ValidateConfig(); err != nil {
+		return err
+	}
 	trading := service.NewTradingService(store, feed, hub, log)
 	digits := service.NewDigitService(store, feed, hub, service.DigitLimits{
 		MaxStake:          decimal.NewFromFloat(cfg.DigitMaxStake),
@@ -154,7 +165,7 @@ func run() error {
 	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount, cfg.MpesaReconcileMinAge), log, time.Minute)
 
 	// --- HTTP ---------------------------------------------------------------
-	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa}
+	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts}
 	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
@@ -179,7 +190,8 @@ func run() error {
 			"mock_feed", cfg.UseMockFeed, "mock_mpesa", cfg.UseMockMpesa,
 			"mpesa_reconcile_every", cfg.MpesaReconcileEvery,
 			"mpesa_reconcile_min_age", cfg.MpesaReconcileMinAge,
-			"mpesa_reconcile_give_up", cfg.MpesaReconcileGiveUp)
+			"mpesa_reconcile_give_up", cfg.MpesaReconcileGiveUp,
+			"payouts_configured", cfg.MpesaInitiatorName != "" || cfg.UseMockMpesa)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen failed", "err", err)
 			stop()

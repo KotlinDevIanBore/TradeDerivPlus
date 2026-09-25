@@ -24,6 +24,7 @@ type Deps struct {
 	Auth    *service.AuthService
 	Admin   *service.AdminService
 	Mpesa   *service.MpesaService
+	Payouts *service.MpesaPayoutService
 	Handler struct {
 		Auth    *handlers.AuthHandler
 		Account *handlers.AccountHandler
@@ -81,6 +82,12 @@ func New(d Deps) *gin.Engine {
 	// Daraja posts here with no token of ours; it is verified by looking the
 	// CheckoutRequestID up against a request we actually made.
 	v1.POST("/mpesa/callback", d.Handler.Wallet.MpesaCallback(d.Mpesa))
+	// Payout callbacks. TWO routes, not one: which URL Daraja posted to is the
+	// only thing that separates "here is what happened" from "our queue gave up
+	// and nobody knows", and the second must never settle or refund anything.
+	// Both answer 200 always, like the deposit callback.
+	v1.POST("/mpesa/b2c/result", d.Handler.Wallet.B2CResult(d.Payouts))
+	v1.POST("/mpesa/b2c/timeout", d.Handler.Wallet.B2CTimeout(d.Payouts))
 
 	protected := v1.Group("", middleware.Auth(d.Auth), middleware.RateLimit(rate.Limit(20), 60))
 	{

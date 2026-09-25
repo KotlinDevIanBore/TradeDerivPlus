@@ -37,21 +37,25 @@ import (
 // harness is everything a test needs: a live database, a store, and the
 // services wired the same way main.go wires them.
 type harness struct {
-	t        *testing.T
-	ctx      context.Context
-	pool     *pgxpool.Pool
-	store    *repository.Store
-	cfg      *config.Config
-	feed     *service.FeedService
-	trading  *service.TradingService
-	digits   *service.DigitService
-	wallet   *service.WalletService
-	admin    *service.AdminService
-	mpesa    *service.MpesaService
-	bots     *service.BotService
-	settings *service.SettingsService
-	events   *captureBroadcaster
-	log      *slog.Logger
+	t       *testing.T
+	ctx     context.Context
+	pool    *pgxpool.Pool
+	store   *repository.Store
+	cfg     *config.Config
+	feed    *service.FeedService
+	trading *service.TradingService
+	digits  *service.DigitService
+	wallet  *service.WalletService
+	admin   *service.AdminService
+	mpesa   *service.MpesaService
+	payouts *service.MpesaPayoutService
+
+	// payoutSender records what was sent and answers however a test scripts it.
+	payoutSender *stubPayoutSender
+	bots         *service.BotService
+	settings     *service.SettingsService
+	events       *captureBroadcaster
+	log          *slog.Logger
 }
 
 // container is started once for the whole package; each test gets clean data
@@ -162,6 +166,19 @@ func newHarness(t *testing.T) *harness {
 
 	mpesa := service.NewMpesaService(store, cfg, log)
 	wallet := service.NewWalletService(store, mpesa, noopBroadcaster{}, cfg, log)
+	payouts := service.NewMpesaPayoutService(store, cfg, log)
+	wallet.SetPayouts(payouts)
+	// A sender that accepts and never reports back, replacing mock mode's
+	// simulator for tests.
+	//
+	// Mock mode's own sender delivers a result a few seconds later on a timer,
+	// which is right for a dev server and wrong for a test: every assertion about
+	// a withdrawal that is still in flight would be racing that timer, and would
+	// pass or fail by how fast the machine is. Tests deliver results explicitly
+	// through h.deliverPayoutResult instead, so what is under test is the
+	// classification and the guards rather than the scheduler.
+	sender := &stubPayoutSender{}
+	payouts.SetSenderForTest(sender)
 	trading := service.NewTradingService(store, feed, noopBroadcaster{}, log)
 	// The production defaults, stated rather than inherited: a test that needs
 	// different limits constructs its own service with its own DigitLimits.
@@ -213,6 +230,7 @@ func newHarness(t *testing.T) *harness {
 		t: t, ctx: ctx, store: store, cfg: cfg,
 		pool: pool,
 		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
+		payouts: payouts, payoutSender: sender,
 		bots: bots, settings: settings, events: events, log: log,
 	}
 }
@@ -365,6 +383,83 @@ func (h *harness) pendingWithdrawalID(accountID uuid.UUID) uuid.UUID {
 		h.t.Fatalf("read the pending withdrawal: %v", err)
 	}
 	return id
+}
+
+// stubPayoutSender is Daraja's payout side, under a test's control. It records
+// every request, answers however the test scripts it, and never delivers a
+// result on its own.
+type stubPayoutSender struct {
+	mu   sync.Mutex
+	sent []mpesaclient.B2CRequest
+	// err, when set, is what SendB2C returns instead of accepting.
+	err error
+}
+
+func (p *stubPayoutSender) SendB2C(_ context.Context, r mpesaclient.B2CRequest) (*mpesaclient.B2CAccepted, error) {
+	p.mu.Lock()
+	p.sent = append(p.sent, r)
+	err := p.err
+	p.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &mpesaclient.B2CAccepted{
+		ConversationID:           "AG_TEST_" + r.OriginatorConversationID,
+		OriginatorConversationID: r.OriginatorConversationID,
+		ResponseDescription:      "Accept the service request successfully.",
+	}, nil
+}
+
+func (p *stubPayoutSender) fail(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.err = err
+}
+
+func (p *stubPayoutSender) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.sent)
+}
+
+func (p *stubPayoutSender) last() (mpesaclient.B2CRequest, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.sent) == 0 {
+		return mpesaclient.B2CRequest{}, false
+	}
+	return p.sent[len(p.sent)-1], true
+}
+
+// payoutResultBody builds the JSON Daraja posts, so a test drives the real
+// parser and the real classification rather than a shortcut past them.
+func payoutResultBody(originatorID, code, desc, receipt string) []byte {
+	params := ""
+	if receipt != "" {
+		params = `{"Key":"TransactionReceipt","Value":"` + receipt + `"},` +
+			`{"Key":"B2CUtilityAccountAvailableFunds","Value":425000.00}`
+	}
+	return []byte(`{"Result":{"ResultType":0,"ResultCode":"` + code + `","ResultDesc":"` + desc + `",` +
+		`"OriginatorConversationID":"` + originatorID + `","ConversationID":"AG_TEST_` + originatorID + `",` +
+		`"TransactionID":"` + receipt + `","ResultParameters":{"ResultParameter":[` + params + `]}}}`)
+}
+
+// deliverPayoutResult posts a result to the payout service the way a route
+// would, with the arrival channel the caller chooses — which is the thing that
+// decides whether an outcome may be acted on.
+func (h *harness) deliverPayoutResult(originatorID, code, desc, receipt string, arrival mpesaclient.PayoutArrival) error {
+	h.t.Helper()
+	return h.payouts.HandleResult(h.ctx, payoutResultBody(originatorID, code, desc, receipt), arrival)
+}
+
+// payoutFor reads the payout row belonging to a withdrawal.
+func (h *harness) payoutFor(txID uuid.UUID) *models.MpesaPayout {
+	h.t.Helper()
+	p, err := h.store.Payouts.GetByTransactionID(h.ctx, txID)
+	if err != nil {
+		h.t.Fatalf("read the payout for %s: %v", txID, err)
+	}
+	return p
 }
 
 // darajaCallback builds the payload Safaricom would POST for an outcome.

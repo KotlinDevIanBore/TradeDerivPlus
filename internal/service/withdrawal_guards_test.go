@@ -90,11 +90,20 @@ func TestWithdrawalsAreRefusedWhileTheFeatureIsOff(t *testing.T) {
 
 // A wallet service with no flag source refuses rather than assuming the feature
 // is on. Fail closed: the wrong direction pays real money out.
+//
+// The payout service IS wired here, deliberately. Withdraw refuses on two
+// independent grounds — no flag source, and nothing to pay through — and both
+// return the same error, so a service missing both would pass this test with the
+// flag check deleted. Wiring payouts leaves the flag as the only thing missing.
+// (This was found when CP2 added the payout check: the test still passed, and
+// CP0's fail-open mutation stopped failing.)
 func TestWithdrawalRefusedWithNoFlagSourceWired(t *testing.T) {
 	h := newHarness(t)
 	userID, accountID := h.verifiedWithBalance(500)
 
 	lone := service.NewWalletService(h.store, h.mpesa, noopBroadcaster{}, h.cfg, h.log)
+	lone.SetPayouts(h.payouts)
+	defer h.wallet.SetPayouts(h.payouts) // SetPayouts re-registers OnResult; give it back
 	if _, err := lone.Withdraw(h.ctx, service.WithdrawInput{
 		UserID: userID, AccountID: accountID,
 		AmountUSD: decimal.NewFromInt(100), PhoneNumber: "0712345678",
@@ -103,6 +112,30 @@ func TestWithdrawalRefusedWithNoFlagSourceWired(t *testing.T) {
 	}
 	if w := h.wallet_(accountID); !w.RealBalance.Equal(decimal.NewFromInt(500)) {
 		t.Fatalf("balance %s, want untouched 500", w.RealBalance)
+	}
+}
+
+// And the other half of fail-closed, which CP2 introduced: a wallet service that
+// can read the flag but has nothing to pay through must refuse too. Otherwise a
+// half-wired deployment debits customers and queues nothing.
+func TestWithdrawalRefusedWithNoPayoutServiceWired(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.verifiedWithBalance(500)
+
+	lone := service.NewWalletService(h.store, h.mpesa, noopBroadcaster{}, h.cfg, h.log)
+	lone.SetWithdrawalFlags(h.settings) // the flag says yes; there is still no sender
+
+	if _, err := lone.Withdraw(h.ctx, service.WithdrawInput{
+		UserID: userID, AccountID: accountID,
+		AmountUSD: decimal.NewFromInt(100), PhoneNumber: "0712345678",
+	}); !errors.Is(err, service.ErrWithdrawalsDisabled) {
+		t.Fatalf("a wallet with no payout service returned %v, want ErrWithdrawalsDisabled", err)
+	}
+	if w := h.wallet_(accountID); !w.RealBalance.Equal(decimal.NewFromInt(500)) {
+		t.Fatalf("balance %s, want untouched 500 — it debited with nothing to pay through", w.RealBalance)
+	}
+	if n := h.countWithdrawals(accountID); n != 0 {
+		t.Fatalf("%d withdrawal rows written with no payout service", n)
 	}
 }
 
