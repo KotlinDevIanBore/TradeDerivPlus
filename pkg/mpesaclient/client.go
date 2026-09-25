@@ -25,6 +25,17 @@ type Client struct {
 	callbackURL    string
 	http           *http.Client
 
+	// B2C, and the two other endpoints that authenticate as the same API user.
+	// The credential is the initiator's password already encrypted under
+	// Safaricom's certificate — see EncryptInitiatorPassword and cmd/gencred. It
+	// is generated once, offline, and supplied as a single value; nothing here
+	// holds the plaintext password or reads a certificate at request time.
+	initiatorName      string
+	securityCredential string
+	// Two distinct URLs, deliberately. See ValidateB2CConfig.
+	b2cResultURL  string
+	b2cTimeoutURL string
+
 	mu          sync.Mutex
 	token       string
 	tokenExpiry time.Time
@@ -37,6 +48,13 @@ type Options struct {
 	Shortcode      string
 	Passkey        string
 	CallbackURL    string
+
+	// Payouts. Optional: a client without these serves deposits perfectly well
+	// and refuses payouts through ValidateB2CConfig.
+	InitiatorName      string
+	SecurityCredential string
+	B2CResultURL       string
+	B2CTimeoutURL      string
 }
 
 func New(o Options) *Client {
@@ -48,6 +66,11 @@ func New(o Options) *Client {
 		passkey:        o.Passkey,
 		callbackURL:    o.CallbackURL,
 		http:           &http.Client{Timeout: 30 * time.Second},
+
+		initiatorName:      o.InitiatorName,
+		securityCredential: o.SecurityCredential,
+		b2cResultURL:       o.B2CResultURL,
+		b2cTimeoutURL:      o.B2CTimeoutURL,
 	}
 }
 
