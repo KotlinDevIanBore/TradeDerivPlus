@@ -197,6 +197,12 @@ func run() error {
 	// settlement handler: a pass that settled with nowhere to send the result
 	// would consume the guard and leave the ledger pending for ever.
 	payouts.Start(ctx)
+
+	// Two jobs on one ticker: abandoned uploads always, reviewed documents only
+	// once a retention period has been set. See section 1 of
+	// docs/kyc-r2-upload-plan.md -- that period is a compliance decision, and zero
+	// (the default) means never delete.
+	service.NewKYCRetentionService(kyc).Start(ctx)
 	// After digits.Start, whose boot sweep has already settled or voided what it
 	// could: runs left live by the previous process are ended here rather than
 	// resumed, and a contract still open folds into its (now stopped) run through
