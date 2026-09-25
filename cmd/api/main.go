@@ -107,6 +107,7 @@ func run() error {
 		BotEnabled:            cfg.BotEnabled,
 		BotAllowlist:          cfg.BotAllowlist,
 		BotRealMoneyEnabled:   cfg.BotRealMoneyEnabled,
+		WithdrawalsEnabled:    cfg.WithdrawalsEnabled,
 	}, log)
 	if err := settings.Bootstrap(ctx); err != nil {
 		return err
@@ -127,6 +128,9 @@ func run() error {
 	// The console settles a stuck deposit through the M-Pesa service, never on
 	// its own: same guards, same lock order as a callback.
 	admin.SetDepositResolver(mpesa)
+	// Withdrawals read their flag through the settings cache. Without this the
+	// wallet refuses every withdrawal, which is the safe direction.
+	wallet.SetWithdrawalFlags(settings)
 
 	go feed.Run(ctx)
 	trading.Start(ctx)

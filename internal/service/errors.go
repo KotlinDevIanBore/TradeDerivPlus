@@ -35,6 +35,10 @@ var (
 	ErrAlreadyReviewed    = errors.New("This submission has already been reviewed")
 	ErrDepositSettled     = errors.New("This deposit has already been settled")
 
+	// Withdrawals. Disabled is a platform state, in flight is this account's.
+	ErrWithdrawalsDisabled = errors.New("Withdrawals are not available yet")
+	ErrWithdrawalInFlight  = errors.New("A withdrawal is already on its way. Wait for it to finish before starting another")
+
 	// Automated runs.
 	ErrBotDisabled          = errors.New("Automated trading is not available on your account yet")
 	ErrBotRealMoneyDisabled = errors.New("Automated runs are available on demo accounts for now")

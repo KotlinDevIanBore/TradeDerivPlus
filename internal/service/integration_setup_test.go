@@ -134,6 +134,12 @@ func newHarness(t *testing.T) *harness {
 		DemoStartingBalance: 10000,
 		UseMockMpesa:        true,
 
+		// The production defaults. As with the reconciliation values below, the
+		// harness builds Config directly so Load's validation never runs on it —
+		// a test that wants a different ceiling sets it itself.
+		MaxWithdrawKES:    150000,
+		MaxWithdrawDayKES: 300000,
+
 		// The production defaults. Load's 60s floor is not applied here — the
 		// harness builds the struct directly — so a test that wants the pass
 		// to reach a fresh deposit lowers MinAge itself, deliberately.
@@ -172,7 +178,14 @@ func newHarness(t *testing.T) *harness {
 		DigitContractsEnabled: true,
 		BotEnabled:            true,
 		BotRealMoneyEnabled:   true,
+		// On in the harness, off in production: the existing withdrawal tests are
+		// about the KYC gate, the overdraw guard and the freeze, and the platform
+		// flag would short-circuit all three. A test that wants the flag off sets
+		// it off itself (TestWithdrawalsAreRefusedWhileTheFeatureIsOff).
+		WithdrawalsEnabled: true,
 	}, log)
+	// Same wiring main.go does: the wallet refuses every withdrawal without it.
+	wallet.SetWithdrawalFlags(settings)
 	if err := settings.Bootstrap(ctx); err != nil {
 		t.Fatalf("settings bootstrap: %v", err)
 	}
@@ -316,6 +329,42 @@ func (h *harness) pendingDeposit(userID, accountID uuid.UUID, kes int64) (uuid.U
 		h.t.Fatalf("start deposit: %v", err)
 	}
 	return resp.TransactionID, resp.CheckoutRequestID
+}
+
+// countWithdrawals and countRows are for asserting that a refused call wrote
+// nothing, and that a refund wrote no extra row.
+func (h *harness) countWithdrawals(accountID uuid.UUID) int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM transactions WHERE account_id = $1 AND type = 'withdrawal'`,
+		accountID).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
+func (h *harness) countRows(accountID uuid.UUID) int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM transactions WHERE account_id = $1`, accountID).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
+// pendingWithdrawalID is the account's one in-flight withdrawal. There can only
+// be one (migration 0008), which is what makes this unambiguous.
+func (h *harness) pendingWithdrawalID(accountID uuid.UUID) uuid.UUID {
+	h.t.Helper()
+	var id uuid.UUID
+	if err := h.pool.QueryRow(h.ctx,
+		`SELECT id FROM transactions WHERE account_id = $1 AND type = 'withdrawal' AND status = 'pending'`,
+		accountID).Scan(&id); err != nil {
+		h.t.Fatalf("read the pending withdrawal: %v", err)
+	}
+	return id
 }
 
 // darajaCallback builds the payload Safaricom would POST for an outcome.

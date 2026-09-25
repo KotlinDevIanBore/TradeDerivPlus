@@ -74,6 +74,27 @@ export function WithdrawSheet({
   const canSubmit = !amountError && !phoneError && amount !== '' && phone !== ''
   const kesAmount = rate.data ? amountValue.times(rate.data.kes_per_usd).toFixed(0) : null
 
+  // Withdrawals are off until the M-Pesa payout exists. Stated plainly rather
+  // than left as a form that debits the balance and pays nobody, and checked
+  // before the verification gate: while the feature is off, being verified
+  // would not help, so promising that it would is the wrong thing to say.
+  if (user?.withdrawals_enabled === false) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange} title="Withdraw to M-Pesa">
+        <div className="py-6 text-center">
+          <h3 className="text-title font-bold tracking-tight">Not available yet</h3>
+          <p className="mx-auto mt-2 max-w-[34ch] text-body text-muted">
+            We can't send money out to M-Pesa yet. Your balance stays where it is, and we'll turn
+            this on as soon as payouts are ready.
+          </p>
+          <Button variant="ghost" block className="mt-6" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </div>
+      </Sheet>
+    )
+  }
+
   if (user && user.kyc_status !== 'verified') {
     return (
       <Sheet open={open} onOpenChange={onOpenChange} title="Verification required">

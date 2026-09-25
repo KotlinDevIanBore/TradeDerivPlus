@@ -14,6 +14,14 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/mpesaclient"
 )
 
+// withdrawalFlags is the one flag the withdrawal path consults. An interface,
+// and wired by a setter rather than through the constructor, because
+// NewWalletService is called from main and from three tests and its signature is
+// worth keeping — the same reasoning as MpesaService's querier seam.
+type withdrawalFlags interface {
+	WithdrawalsEnabled(ctx context.Context) (bool, error)
+}
+
 // WalletService orchestrates deposits, withdrawals and ledger reads.
 // It does not know how trades work and it does not speak Daraja.
 type WalletService struct {
@@ -23,10 +31,18 @@ type WalletService struct {
 	cfg   *config.Config
 	log   *slog.Logger
 
+	// flags gates withdrawals. Nil means refuse: a wallet service with no flag
+	// source must not decide that a feature guarding real payouts is on.
+	flags withdrawalFlags
+
 	// onDepositSettled reports the outcome for metrics. main wires the
 	// Prometheus counter here so this service stays unaware of it.
 	onDepositSettled func(status string)
 }
+
+// SetWithdrawalFlags wires the settings service in. Until it is called,
+// withdrawals are refused.
+func (s *WalletService) SetWithdrawalFlags(f withdrawalFlags) { s.flags = f }
 
 // OnDepositSettled registers the outcome hook.
 func (s *WalletService) OnDepositSettled(fn func(status string)) { s.onDepositSettled = fn }
@@ -321,6 +337,89 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 	s.notify(tx.AccountID, "wallet", wallet)
 }
 
+// Settlement sources for a withdrawal, as written to metadata.settled_by. The
+// payout and its reconciler arrive in later checkpoints; "admin" is what an
+// operator closing a stuck withdrawal by hand will write.
+const (
+	WithdrawalFailedByPayout = "payout"
+	WithdrawalFailedByAdmin  = "admin"
+)
+
+// FailWithdrawal closes a pending withdrawal as failed and returns the money.
+//
+// It is the only place a withdrawal is refunded, and it is two writes and
+// exactly two: the guarded status flip, then the wallet credit, in one
+// transaction. Not three — a compensating ledger row alongside these would
+// credit the ledger twice, because the flip to 'failed' already takes the row
+// out of balanceAffectingRows and hands the amount back to the ledger total.
+// The predicate's comment carries the same warning from the other side.
+//
+// The order is transactions-row then wallets-row, matching settleDeposit and
+// every other path that locks an existing ledger row. Withdraw itself takes the
+// wallet first, which is safe only because its ledger write is an INSERT of a
+// new row; copying that order here would make this the first wallets-then-
+// transactions path in the codebase and deadlock it against deposit settlement.
+//
+// It reports whether this call performed the refund. The guard inside the UPDATE
+// decides, not a read before it: a payout result and its retry, or a result and
+// an operator, can arrive together, and only one of them may credit.
+func (s *WalletService) FailWithdrawal(ctx context.Context, txID uuid.UUID, reason, source string) (bool, error) {
+	var refunded bool
+	var wallet *models.Wallet
+	var accountID uuid.UUID
+	var amount decimal.Decimal
+
+	err := s.store.WithTx(ctx, func(st *repository.Store) error {
+		tx, err := st.Transactions.GetByID(ctx, txID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if tx.Type != models.TxWithdrawal {
+			return invalid("transaction", "Only a withdrawal can be refunded this way")
+		}
+		accountID, amount = tx.AccountID, tx.Amount.Abs()
+
+		won, err := st.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusFailed,
+			map[string]any{"reason": reason, "settled_by": source})
+		if err != nil {
+			return err
+		}
+		if !won {
+			// Already settled — by a retry of the same result, or by an operator.
+			// Whoever won it credited; this call must not.
+			return nil
+		}
+
+		w, err := st.Wallets.Adjust(ctx, tx.AccountID, models.BalanceReal, amount)
+		if err != nil {
+			return err
+		}
+		wallet, refunded = w, true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	if !refunded {
+		s.log.Info("duplicate withdrawal refund ignored", "transaction", txID, "source", source)
+		return false, nil
+	}
+
+	s.log.Info("withdrawal refunded", "transaction", txID, "amount_usd", amount.String(), "source", source, "reason", reason)
+	s.notify(accountID, "transaction", map[string]any{
+		"transaction_id": txID,
+		"status":         models.StatusFailed,
+		"type":           models.TxWithdrawal,
+		"reason":         reason,
+		"settled_by":     source,
+	})
+	s.notify(accountID, "wallet", wallet)
+	return true, nil
+}
+
 // --- Withdrawals -----------------------------------------------------------
 
 type WithdrawInput struct {
@@ -334,6 +433,21 @@ type WithdrawInput struct {
 // Debiting up front stops a user spending the same balance twice while a
 // payout is in flight.
 func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models.Transaction, error) {
+	// The platform gate first: while withdrawals are off, nothing else about the
+	// request matters. Off by default, because the payout does not exist yet.
+	if s.flags == nil {
+		return nil, ErrWithdrawalsDisabled
+	}
+	enabled, err := s.flags.WithdrawalsEnabled(ctx)
+	if err != nil {
+		// A broken settings read is not a disabled feature, and it is not a
+		// licence to pay out either. Refuse, and say it was us.
+		return nil, err
+	}
+	if !enabled {
+		return nil, ErrWithdrawalsDisabled
+	}
+
 	account, err := s.OwnedAccount(ctx, in.UserID, in.AccountID)
 	if err != nil {
 		return nil, err
@@ -352,6 +466,13 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 
 	if in.AmountUSD.LessThanOrEqual(decimal.Zero) {
 		return nil, invalid("amount", "Enter an amount greater than zero")
+	}
+	// Ceilings are expressed in KES, the currency the customer is paid in and the
+	// one Daraja's own limits are written in.
+	amountKES := s.usdToKES(in.AmountUSD)
+	maxKES := decimal.NewFromFloat(s.cfg.MaxWithdrawKES)
+	if amountKES.GreaterThan(maxKES) {
+		return nil, invalid("amount", "Maximum withdrawal is KES "+maxKES.StringFixed(0)+" per transaction")
 	}
 	phone := mpesaclient.NormalizePhone(in.PhoneNumber)
 	if !mpesaclient.ValidPhone(phone) {
@@ -380,6 +501,18 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 			return ErrInsufficientFunds
 		}
 
+		// The daily cap, read under the same lock as the balance so two
+		// concurrent withdrawals cannot each see the other's headroom.
+		alreadyUSD, err := st.Transactions.WithdrawnTodayUSD(ctx, account.ID)
+		if err != nil {
+			return err
+		}
+		dayKES := s.usdToKES(alreadyUSD).Add(amountKES)
+		if capKES := decimal.NewFromFloat(s.cfg.MaxWithdrawDayKES); dayKES.GreaterThan(capKES) {
+			return invalid("amount", "That would take today's withdrawals past the daily limit of KES "+
+				capKES.StringFixed(0)+". Already withdrawn today: KES "+s.usdToKES(alreadyUSD).StringFixed(0))
+		}
+
 		tx = &models.Transaction{
 			AccountID:   account.ID,
 			Type:        models.TxWithdrawal,
@@ -387,12 +520,19 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 			Amount:      in.AmountUSD.Neg(),
 			Status:      models.StatusPending,
 			Metadata: map[string]any{
-				"amount_kes": s.usdToKES(in.AmountUSD).StringFixed(2),
+				"amount_kes": amountKES.StringFixed(2),
 				"phone":      maskPhone(phone),
 				"channel":    "mpesa",
 			},
 		}
 		if err := st.Transactions.Insert(ctx, tx); err != nil {
+			// The partial unique index (migration 0008) is what makes a second
+			// in-flight withdrawal impossible rather than merely unlikely. A
+			// double-submitted request loses here, before any payout exists to
+			// send twice.
+			if errors.Is(err, repository.ErrConflict) {
+				return ErrWithdrawalInFlight
+			}
 			return err
 		}
 

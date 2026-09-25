@@ -262,9 +262,16 @@ else:
 
 # --- Wallet: withdrawals ---------------------------------------------------
 print("\nWITHDRAW")
+# Withdrawals are off until the M-Pesa payout exists, and the platform gate is
+# checked before the per-user ones — so that is the refusal a smoke run sees.
+# The KYC gate is still covered, in the integration suite, where the flag can be
+# turned on (TestWithdrawalGatesAndLimits). Accept either, and say which: on a
+# database where someone has enabled withdrawals, KYC is what refuses this.
 _, wd = call("POST", "/wallet/withdraw",
              {"account_id": real_account, "amount_usd": "10", "phone_number": phone}, expect=403)
-check("withdrawal is gated behind KYC", wd.get("error", {}).get("code") == "kyc_required")
+wd_code = wd.get("error", {}).get("code")
+check("withdrawal is refused, by the feature flag or by KYC",
+      wd_code in ("withdrawals_disabled", "kyc_required"), f"got {wd_code}")
 
 # --- Ledger ----------------------------------------------------------------
 print("\nLEDGER")

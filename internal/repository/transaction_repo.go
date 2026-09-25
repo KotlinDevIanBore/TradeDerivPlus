@@ -189,12 +189,20 @@ func (r *TransactionRepo) SearchAll(ctx context.Context, query, txType, status s
 }
 
 // TodayTotals powers two dashboard tiles in one query per type.
+//
+// It counts rows that have moved money, which is balanceAffectingRows and not
+// status = 'completed'. For deposits those are the same thing. For withdrawals
+// they are not: a pending withdrawal has already been debited, and nothing in
+// this codebase can yet move a withdrawal off 'pending' — so filtering on
+// 'completed' made the withdrawal tiles structurally zero while real money was
+// leaving wallets. One predicate, so the dashboard cannot disagree with the
+// ledger or the drift gauge about what counts.
 func (r *TransactionRepo) TodayTotals(ctx context.Context, txType string) (count int, total decimal.Decimal, err error) {
 	var sum decimal.NullDecimal
 	err = r.db.QueryRow(ctx, `
 		SELECT count(*), sum(abs(amount))
 		FROM transactions
-		WHERE type = $1 AND status = 'completed' AND created_at >= date_trunc('day', now())`,
+		WHERE type = $1 AND `+balanceAffectingRows+` AND created_at >= date_trunc('day', now())`,
 		txType).Scan(&count, &sum)
 	if err != nil {
 		return 0, decimal.Zero, mapErr(err)
@@ -203,6 +211,26 @@ func (r *TransactionRepo) TodayTotals(ctx context.Context, txType string) (count
 		total = sum.Decimal
 	}
 	return count, total, nil
+}
+
+// WithdrawnTodayUSD is what this account has already taken out today, for the
+// daily cap. It counts pending alongside completed for the same reason
+// TodayTotals does: a pending withdrawal is money already gone, and letting it
+// fall outside the cap would let the cap be bypassed simply by not waiting.
+func (r *TransactionRepo) WithdrawnTodayUSD(ctx context.Context, accountID uuid.UUID) (decimal.Decimal, error) {
+	var sum decimal.NullDecimal
+	err := r.db.QueryRow(ctx, `
+		SELECT sum(abs(amount)) FROM transactions
+		WHERE account_id = $1 AND type = 'withdrawal' AND `+balanceAffectingRows+`
+		  AND created_at >= date_trunc('day', now())`,
+		accountID).Scan(&sum)
+	if err != nil {
+		return decimal.Zero, mapErr(err)
+	}
+	if !sum.Valid {
+		return decimal.Zero, nil
+	}
+	return sum.Decimal, nil
 }
 
 // DepositsByHour is the dashboard's 24-hour success-versus-failure series. A

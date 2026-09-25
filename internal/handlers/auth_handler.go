@@ -139,6 +139,11 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	withdrawals, err := h.settings.WithdrawalsEnabled(ctx)
+	if err != nil {
+		fail(c, err)
+		return
+	}
 	digit, err := h.settings.DigitContractsEnabled(ctx)
 	if err != nil {
 		fail(c, err)
@@ -160,6 +165,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, meResponse{
 		User:                  *user,
 		DigitContractsEnabled: digit,
+		WithdrawalsEnabled:    withdrawals,
 		BotEnabled:            botEnabled,
 		BotRealMoneyEnabled:   botRealMoney,
 		DigitMaxStake:         decimal.NewFromFloat(h.cfg.DigitMaxStake).StringFixed(2),
@@ -170,6 +176,10 @@ func (h *AuthHandler) Me(c *gin.Context) {
 type meResponse struct {
 	models.User
 	DigitContractsEnabled bool `json:"digit_contracts_enabled"`
+	// WithdrawalsEnabled is false until the M-Pesa payout exists. The wallet
+	// screen reads it so it can say so plainly rather than offer a button that
+	// takes money and pays nobody.
+	WithdrawalsEnabled bool `json:"withdrawals_enabled"`
 	// BotEnabled is already narrowed by the allowlist, so it answers "may this
 	// user start a run" rather than "is the feature switched on somewhere".
 	BotEnabled bool `json:"bot_enabled"`

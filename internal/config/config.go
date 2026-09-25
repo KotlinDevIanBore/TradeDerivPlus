@@ -82,6 +82,19 @@ type Config struct {
 	MaxDepositKES       float64
 	DemoStartingBalance float64
 
+	// Withdrawals. Seeds withdrawals_enabled once, like the bot flags: default
+	// FALSE because a withdrawal debits the balance and waits on an M-Pesa payout
+	// that does not exist yet.
+	WithdrawalsEnabled bool
+	// Per-transaction and per-account-per-day ceilings, in KES. PROVISIONAL and a
+	// product decision, not an engineering one: the figures below sit under
+	// Daraja's own B2C limits (a daily 500,000 per the API's limit-rule result
+	// codes) so a refusal happens here, at validation, rather than as a B2C
+	// failure after the customer has already been debited. Deposits are capped at
+	// MAX_DEPOSIT_KES; withdrawals had no ceiling at all before this.
+	MaxWithdrawKES    float64
+	MaxWithdrawDayKES float64
+
 	// Signal bot
 	SignalInterval time.Duration
 	SignalSymbols  []string
@@ -162,6 +175,10 @@ func Load() (*Config, error) {
 		MaxDepositKES:       getFloat("MAX_DEPOSIT_KES", 150000),
 		DemoStartingBalance: getFloat("DEMO_STARTING_BALANCE", 10000),
 
+		WithdrawalsEnabled: getBool("WITHDRAWALS_ENABLED", false),
+		MaxWithdrawKES:     getFloat("MAX_WITHDRAW_KES", 150000),
+		MaxWithdrawDayKES:  getFloat("MAX_WITHDRAW_DAY_KES", 300000),
+
 		SignalInterval: getDuration("SIGNAL_INTERVAL", 2*time.Minute),
 		SignalSymbols:  []string{"R_10", "R_25", "R_50", "R_75", "R_100", "BOOM500", "CRASH500", "EURUSD"},
 
@@ -200,6 +217,13 @@ func Load() (*Config, error) {
 	}
 	if !c.UseMockMpesa && (c.MpesaConsumerKey == "" || c.MpesaPasskey == "") {
 		return nil, fmt.Errorf("MPESA_CONSUMER_KEY and MPESA_PASSKEY required when USE_MOCK_MPESA=false")
+	}
+	if c.MaxWithdrawKES <= 0 || c.MaxWithdrawDayKES <= 0 {
+		return nil, fmt.Errorf("MAX_WITHDRAW_KES and MAX_WITHDRAW_DAY_KES must be positive")
+	}
+	if c.MaxWithdrawDayKES < c.MaxWithdrawKES {
+		return nil, fmt.Errorf("MAX_WITHDRAW_DAY_KES (%.0f) must be at least MAX_WITHDRAW_KES (%.0f), or no withdrawal of the maximum size could ever be made",
+			c.MaxWithdrawDayKES, c.MaxWithdrawKES)
 	}
 	if c.MpesaReconcileMinAge < MpesaReconcileMinAgeFloor {
 		c.MpesaReconcileMinAge = MpesaReconcileMinAgeFloor

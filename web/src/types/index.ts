@@ -150,6 +150,8 @@ export interface User {
   updated_at: string
   /** Runtime flag from app_settings — swaps the main trading surface. Absent on login/register payloads until /me is fetched. */
   digit_contracts_enabled?: boolean
+  /** False until the M-Pesa payout exists. See WithdrawSheet. */
+  withdrawals_enabled?: boolean
   /**
    * Whether this user may start an automated run. Already narrowed by the
    * allowlist server-side, so it answers "show the control" directly rather than
