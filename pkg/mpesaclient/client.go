@@ -35,6 +35,12 @@ type Client struct {
 	// Two distinct URLs, deliberately. See ValidateB2CConfig.
 	b2cResultURL  string
 	b2cTimeoutURL string
+	// Status-query answers arrive on their own URL. They have to: a Transaction
+	// Status result and a B2C payout result are different documents that would
+	// otherwise land on one route, leaving the handler to guess which it is from
+	// the body. Keeping the channel the discriminator is the same rule the
+	// timeout URL follows.
+	b2cStatusResultURL string
 
 	mu          sync.Mutex
 	token       string
@@ -55,6 +61,7 @@ type Options struct {
 	SecurityCredential string
 	B2CResultURL       string
 	B2CTimeoutURL      string
+	B2CStatusResultURL string
 }
 
 func New(o Options) *Client {
@@ -71,6 +78,7 @@ func New(o Options) *Client {
 		securityCredential: o.SecurityCredential,
 		b2cResultURL:       o.B2CResultURL,
 		b2cTimeoutURL:      o.B2CTimeoutURL,
+		b2cStatusResultURL: o.B2CStatusResultURL,
 	}
 }
 

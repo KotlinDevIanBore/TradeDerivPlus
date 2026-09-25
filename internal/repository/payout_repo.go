@@ -153,6 +153,91 @@ func (r *PayoutRepo) Settle(ctx context.Context, originatorID, status, resultCod
 	return tag.RowsAffected() > 0, nil
 }
 
+// ListDue is what the reconciliation pass works from: payouts whose outcome is
+// still open and whose next look has come, oldest first, bounded so one pass is.
+//
+// An open row with next_query_at NULL is never listed, and that is how "given up"
+// is expressed — see MarkGaveUp. Every other path that leaves a row open sets a
+// schedule (Insert, MarkSent, MarkUnknown), so NULL on an open row means exactly
+// one thing.
+func (r *PayoutRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]models.MpesaPayout, error) {
+	rows, err := r.db.Query(ctx, payoutSelect+`
+		WHERE status IN ('pending', 'sent', 'unknown') AND next_query_at <= $1
+		ORDER BY next_query_at ASC
+		LIMIT $2`, now, limit)
+	if err != nil {
+		return nil, mapErr(err)
+	}
+	defer rows.Close()
+	out := []models.MpesaPayout{}
+	for rows.Next() {
+		p, err := scanPayout(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *p)
+	}
+	return out, rows.Err()
+}
+
+// MarkQueried records that a status query was asked and when to ask again.
+//
+// Guarded on the open statuses so a payout settled between the pass reading it
+// and writing to it — by a result callback arriving in that window — is not
+// walked back onto a schedule it no longer needs.
+func (r *PayoutRepo) MarkQueried(ctx context.Context, originatorID string, attempts int, next time.Time) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE mpesa_payouts
+		SET reconcile_attempts = $2, next_query_at = $3, updated_at = now()
+		WHERE originator_conversation_id = $1
+		  AND status IN ('pending', 'sent', 'unknown')`,
+		originatorID, attempts, next)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// MarkGaveUp stops asking about a payout, leaving it open and unscheduled for an
+// operator.
+//
+// It deliberately does NOT settle and does NOT refund. Giving up means we stopped
+// asking, not that we learned anything — and the customer's money is already out,
+// so a refund here would be the same unproven guess that 'unknown' exists to
+// refuse. What it changes is who is responsible: with no schedule, nothing
+// automated will look again.
+//
+// next_query_at NULL on an open row is the marker, the same convention the
+// deposit reconciler uses, and it is why every other path that leaves a row open
+// sets a schedule.
+func (r *PayoutRepo) MarkGaveUp(ctx context.Context, originatorID, reason string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE mpesa_payouts
+		SET next_query_at = NULL, result_desc = $2, updated_at = now()
+		WHERE originator_conversation_id = $1
+		  AND status IN ('pending', 'sent', 'unknown')
+		  AND next_query_at IS NOT NULL`,
+		originatorID, reason)
+	if err != nil {
+		return false, mapErr(err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// CountGivenUp counts open payouts nothing is looking at any more. Separate from
+// the unknown count because they answer different questions: how many customers
+// are waiting on an answer, versus how many have been handed to a person.
+func (r *PayoutRepo) CountGivenUp(ctx context.Context) (int, error) {
+	var n int
+	err := r.db.QueryRow(ctx, `
+		SELECT count(*) FROM mpesa_payouts
+		WHERE status IN ('pending', 'sent', 'unknown') AND next_query_at IS NULL`).Scan(&n)
+	if err != nil {
+		return 0, mapErr(err)
+	}
+	return n, nil
+}
+
 // ListOpen is what an operator's view and the future reconciliation pass read:
 // payouts whose outcome is undecided, oldest first.
 func (r *PayoutRepo) ListOpen(ctx context.Context, limit int) ([]models.MpesaPayout, error) {

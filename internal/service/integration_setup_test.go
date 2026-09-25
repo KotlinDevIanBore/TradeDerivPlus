@@ -51,11 +51,12 @@ type harness struct {
 	payouts *service.MpesaPayoutService
 
 	// payoutSender records what was sent and answers however a test scripts it.
-	payoutSender *stubPayoutSender
-	bots         *service.BotService
-	settings     *service.SettingsService
-	events       *captureBroadcaster
-	log          *slog.Logger
+	payoutSender  *stubPayoutSender
+	payoutQuerier *stubPayoutQuerier
+	bots          *service.BotService
+	settings      *service.SettingsService
+	events        *captureBroadcaster
+	log           *slog.Logger
 }
 
 // container is started once for the whole package; each test gets clean data
@@ -144,6 +145,13 @@ func newHarness(t *testing.T) *harness {
 		MaxWithdrawKES:    150000,
 		MaxWithdrawDayKES: 300000,
 
+		// The payout pass's schedule. Omitting these left GiveUp at zero, which
+		// made every payout instantly past the horizon — and the give-up test
+		// passed anyway, because it could not tell a working horizon from one at
+		// zero. The three tests that assert the pass ASKS are what caught it.
+		MpesaPayoutQueryEvery: time.Minute,
+		MpesaPayoutGiveUp:     24 * time.Hour,
+
 		// The production defaults. Load's 60s floor is not applied here — the
 		// harness builds the struct directly — so a test that wants the pass
 		// to reach a fresh deposit lowers MinAge itself, deliberately.
@@ -179,6 +187,10 @@ func newHarness(t *testing.T) *harness {
 	// classification and the guards rather than the scheduler.
 	sender := &stubPayoutSender{}
 	payouts.SetSenderForTest(sender)
+	// A querier that records questions and never answers them: the answer arrives
+	// on its own channel, which a test delivers explicitly.
+	querier := &stubPayoutQuerier{}
+	payouts.SetQuerierForTest(querier)
 	trading := service.NewTradingService(store, feed, noopBroadcaster{}, log)
 	// The production defaults, stated rather than inherited: a test that needs
 	// different limits constructs its own service with its own DigitLimits.
@@ -230,7 +242,7 @@ func newHarness(t *testing.T) *harness {
 		t: t, ctx: ctx, store: store, cfg: cfg,
 		pool: pool,
 		feed: feed, trading: trading, digits: digits, wallet: wallet, admin: admin, mpesa: mpesa,
-		payouts: payouts, payoutSender: sender,
+		payouts: payouts, payoutSender: sender, payoutQuerier: querier,
 		bots: bots, settings: settings, events: events, log: log,
 	}
 }
@@ -429,6 +441,66 @@ func (p *stubPayoutSender) last() (mpesaclient.B2CRequest, bool) {
 		return mpesaclient.B2CRequest{}, false
 	}
 	return p.sent[len(p.sent)-1], true
+}
+
+// stubPayoutQuerier is the Transaction Status endpoint under a test's control. It
+// records what was asked and never answers: the answer is asynchronous in
+// reality, and a test delivers it through h.deliverStatusResult.
+type stubPayoutQuerier struct {
+	mu    sync.Mutex
+	asked []string
+	err   error
+}
+
+func (q *stubPayoutQuerier) QueryTransactionStatus(_ context.Context, r mpesaclient.StatusRequest) (*mpesaclient.StatusAccepted, error) {
+	q.mu.Lock()
+	q.asked = append(q.asked, r.OriginatorConversationID)
+	err := q.err
+	q.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return &mpesaclient.StatusAccepted{ConversationID: "AG_STATUS", ResponseDescription: "accepted"}, nil
+}
+
+func (q *stubPayoutQuerier) fail(err error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.err = err
+}
+
+func (q *stubPayoutQuerier) countFor(originatorID string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := 0
+	for _, id := range q.asked {
+		if id == originatorID {
+			n++
+		}
+	}
+	return n
+}
+
+// statusResultBody is the document Daraja posts to the status channel. Note that
+// its ResultCode is about the QUERY, and the payout's own state is in the
+// TransactionStatus parameter — the distinction the separate channel exists for.
+func statusResultBody(originatorID, queryCode, txStatus, receipt string) []byte {
+	params := ""
+	if txStatus != "" {
+		params = `{"Key":"TransactionStatus","Value":"` + txStatus + `"}`
+		if receipt != "" {
+			params += `,{"Key":"ReceiptNo","Value":"` + receipt + `"}`
+		}
+	}
+	return []byte(`{"Result":{"ResultType":0,"ResultCode":"` + queryCode + `","ResultDesc":"query result",` +
+		`"OriginatorConversationID":"` + originatorID + `","ConversationID":"AG_TEST_` + originatorID + `",` +
+		`"ResultParameters":{"ResultParameter":[` + params + `]}}}`)
+}
+
+// deliverStatusResult posts a status answer the way the status route would.
+func (h *harness) deliverStatusResult(originatorID, queryCode, txStatus, receipt string, arrival mpesaclient.PayoutArrival) error {
+	h.t.Helper()
+	return h.payouts.HandleStatusResult(h.ctx, statusResultBody(originatorID, queryCode, txStatus, receipt), arrival)
 }
 
 // payoutResultBody builds the JSON Daraja posts, so a test drives the real

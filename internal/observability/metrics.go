@@ -111,6 +111,53 @@ var (
 		Help: "Pending deposits examined by the STK reconciliation pass, by what happened.",
 	}, []string{"outcome"})
 
+	// Payouts, by how they ended. One increment per payout settled, not per
+	// callback seen: a result and its retries are one payout, and counting
+	// deliveries would make every reading of this a multiple of the truth — the
+	// mistake bot_contracts_total made and had corrected.
+	//
+	// 'never_received' is broken out rather than folded into 'failed' because the
+	// two mean different things operationally: a failure is Daraja refusing, and
+	// never_received is us establishing that Daraja never had the request.
+	mpesaPayoutsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mpesa_payouts_total",
+		Help: "M-Pesa payouts settled, one per payout, by outcome.",
+	}, []string{"outcome"})
+
+	// What the reconciliation pass did, per payout it looked at. Separate from the
+	// counter above for the same reason placements are separate from settlements:
+	// asking a question and establishing an outcome are two events about one
+	// payout, and summing them counts it twice.
+	mpesaPayoutQueriesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "mpesa_payout_queries_total",
+		Help: "Payouts examined by the reconciliation pass, by what the pass did.",
+	}, []string{"outcome"})
+
+	// THE number to alert on. Each one is a customer whose balance was debited and
+	// about whom Daraja has said nothing either way — so it is neither safe to
+	// refund nor safe to call paid. Unlike a stale deposit, the money has already
+	// left. Alert on > 0 for more than a few minutes.
+	mpesaPayoutsUnknown = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mpesa_payouts_unknown",
+		Help: "Payouts whose outcome is unknown. Each is a debited customer with no answer.",
+	})
+
+	// Open payouts nothing is looking at any more, because the pass gave up. These
+	// need a person; the gauge above is what they are working through.
+	mpesaPayoutsGivenUp = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mpesa_payouts_given_up",
+		Help: "Open payouts past the give-up horizon, awaiting an operator.",
+	})
+
+	// The business's remaining B2C float, in KES, as Daraja reports it on every
+	// successful payout. Free on the happy path, and the difference between
+	// noticing an empty utility account before customers do or after. Alert well
+	// above one withdrawal's worth.
+	mpesaB2CUtilityAvailable = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "mpesa_b2c_utility_available_kes",
+		Help: "B2C utility account funds available, in KES, from the last successful payout.",
+	})
+
 	// Deposits pending longer than the reconciliation min-age. Counts every
 	// such row, including ones the pass has given up on or cannot see, so this
 	// is the number an operator owes attention to.
@@ -126,6 +173,32 @@ func init() {
 	for _, o := range []string{"succeeded", "unresolved", "failed_ignored", "error", "gave_up", "already_settled"} {
 		mpesaReconcileTotal.WithLabelValues(o)
 	}
+	for _, o := range []string{"completed", "failed", "never_received"} {
+		mpesaPayoutsTotal.WithLabelValues(o)
+	}
+	for _, o := range []string{"queried", "gave_up", "error", "already_settled"} {
+		mpesaPayoutQueriesTotal.WithLabelValues(o)
+	}
+}
+
+// RecordPayout is called once per payout settled, with how it ended.
+func RecordPayout(outcome string) { mpesaPayoutsTotal.WithLabelValues(outcome).Inc() }
+
+// RecordPayoutQuery is called once per payout the reconciliation pass examines.
+func RecordPayoutQuery(outcome string) { mpesaPayoutQueriesTotal.WithLabelValues(outcome).Inc() }
+
+// RecordB2CUtilityFloat is called with the float Daraja reports on a successful
+// payout. A blank or unparseable value is ignored rather than zeroing the gauge —
+// zero float is an emergency and must not be reported by a parse failure.
+func RecordB2CUtilityFloat(available string) {
+	if available == "" {
+		return
+	}
+	v, err := strconv.ParseFloat(available, 64)
+	if err != nil {
+		return
+	}
+	mpesaB2CUtilityAvailable.Set(v)
 }
 
 // RecordReconcile is called once per row the reconciliation pass examines.
@@ -176,6 +249,8 @@ type Sampler interface {
 	DriftedAccounts(ctx context.Context) (int, error)
 	LiveBotRuns(ctx context.Context) (int, error)
 	StaleDeposits(ctx context.Context) (int, error)
+	UnknownPayouts(ctx context.Context) (int, error)
+	GivenUpPayouts(ctx context.Context) (int, error)
 	Connections() int
 }
 
@@ -212,6 +287,24 @@ func Collect(ctx context.Context, s Sampler, log *slog.Logger, every time.Durati
 			mpesaDepositsPendingStale.Set(float64(n))
 		} else {
 			log.Warn("metrics: stale deposits", "err", err)
+		}
+
+		if n, err := s.UnknownPayouts(sampleCtx); err == nil {
+			mpesaPayoutsUnknown.Set(float64(n))
+			if n > 0 {
+				// Worth a log line as well as a gauge: each one is a customer
+				// debited with nothing known either way, and whoever reads logs
+				// should not need a dashboard to learn that.
+				log.Error("PAYOUTS WITH UNKNOWN OUTCOME", "count", n)
+			}
+		} else {
+			log.Warn("metrics: unknown payouts", "err", err)
+		}
+
+		if n, err := s.GivenUpPayouts(sampleCtx); err == nil {
+			mpesaPayoutsGivenUp.Set(float64(n))
+		} else {
+			log.Warn("metrics: given-up payouts", "err", err)
 		}
 
 		wsConnections.Set(float64(s.Connections()))

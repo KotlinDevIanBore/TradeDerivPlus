@@ -76,6 +76,16 @@ type Config struct {
 	MpesaSecurityCredential string
 	MpesaB2CResultURL       string
 	MpesaB2CTimeoutURL      string
+	// Status-query answers land here. A third URL because a Transaction Status
+	// result is a different document from a payout result, and a handler that has
+	// to guess which it holds can classify a failed QUERY as a failed payout.
+	MpesaB2CStatusResultURL string
+
+	// The payout reconciliation pass. PROVISIONAL, like the deposit schedule.
+	// GiveUp does NOT refund — it stops asking and hands the row to a person,
+	// because the customer's money is already out and we still do not know.
+	MpesaPayoutQueryEvery time.Duration
+	MpesaPayoutGiveUp     time.Duration
 
 	// STK reconciliation: the pass that asks Daraja about deposits whose
 	// callback has not arrived. The numbers are PROVISIONAL — guesses at what
@@ -186,6 +196,10 @@ func Load() (*Config, error) {
 		MpesaSecurityCredential: getEnv("MPESA_SECURITY_CREDENTIAL", ""),
 		MpesaB2CResultURL:       getEnv("MPESA_B2C_RESULT_URL", ""),
 		MpesaB2CTimeoutURL:      getEnv("MPESA_B2C_TIMEOUT_URL", ""),
+		MpesaB2CStatusResultURL: getEnv("MPESA_B2C_STATUS_RESULT_URL", ""),
+
+		MpesaPayoutQueryEvery: getDuration("MPESA_PAYOUT_QUERY_EVERY", time.Minute),
+		MpesaPayoutGiveUp:     getDuration("MPESA_PAYOUT_GIVE_UP", 24*time.Hour),
 
 		MpesaReconcileEvery:  getDuration("MPESA_RECONCILE_EVERY", time.Minute),
 		MpesaReconcileMinAge: getDuration("MPESA_RECONCILE_MIN_AGE", 3*time.Minute),
@@ -243,17 +257,43 @@ func Load() (*Config, error) {
 	// or collapsed setup fails at boot rather than at the first withdrawal. It is
 	// allowed to be entirely absent: a deployment that only takes deposits needs
 	// none of it, and withdrawals_enabled is off by default.
-	if c.MpesaInitiatorName != "" || c.MpesaSecurityCredential != "" ||
-		c.MpesaB2CResultURL != "" || c.MpesaB2CTimeoutURL != "" {
-		if c.MpesaInitiatorName == "" || c.MpesaSecurityCredential == "" ||
-			c.MpesaB2CResultURL == "" || c.MpesaB2CTimeoutURL == "" {
+	payoutVars := []string{c.MpesaInitiatorName, c.MpesaSecurityCredential,
+		c.MpesaB2CResultURL, c.MpesaB2CTimeoutURL, c.MpesaB2CStatusResultURL}
+	anySet, allSet := false, true
+	for _, v := range payoutVars {
+		if v != "" {
+			anySet = true
+		} else {
+			allSet = false
+		}
+	}
+	if anySet {
+		if !allSet {
 			return nil, fmt.Errorf("payouts need all of MPESA_INITIATOR_NAME, MPESA_SECURITY_CREDENTIAL, " +
-				"MPESA_B2C_RESULT_URL and MPESA_B2C_TIMEOUT_URL, or none of them")
+				"MPESA_B2C_RESULT_URL, MPESA_B2C_TIMEOUT_URL and MPESA_B2C_STATUS_RESULT_URL, or none of them")
 		}
-		if c.MpesaB2CResultURL == c.MpesaB2CTimeoutURL {
-			return nil, fmt.Errorf("MPESA_B2C_RESULT_URL and MPESA_B2C_TIMEOUT_URL must differ: " +
-				"a queue timeout means 'we do not know', and one handler for both cannot tell it from a failure")
+		// Three URLs, three meanings, and each pair must differ. Sharing any two
+		// loses the distinction that tells an outcome from "we do not know", or a
+		// payout's failure from a status query's own.
+		urls := map[string]string{
+			"MPESA_B2C_RESULT_URL":        c.MpesaB2CResultURL,
+			"MPESA_B2C_TIMEOUT_URL":       c.MpesaB2CTimeoutURL,
+			"MPESA_B2C_STATUS_RESULT_URL": c.MpesaB2CStatusResultURL,
 		}
+		seen := map[string]string{}
+		for name, url := range urls {
+			if other, dup := seen[url]; dup {
+				return nil, fmt.Errorf("%s and %s must differ: each carries a different meaning, "+
+					"and one handler for two of them cannot tell an outcome from 'we do not know'", other, name)
+			}
+			seen[url] = name
+		}
+	}
+	if c.MpesaPayoutQueryEvery <= 0 {
+		return nil, fmt.Errorf("MPESA_PAYOUT_QUERY_EVERY must be positive")
+	}
+	if c.MpesaPayoutGiveUp <= 0 {
+		return nil, fmt.Errorf("MPESA_PAYOUT_GIVE_UP must be positive")
 	}
 	if c.MaxWithdrawKES <= 0 || c.MaxWithdrawDayKES <= 0 {
 		return nil, fmt.Errorf("MAX_WITHDRAW_KES and MAX_WITHDRAW_DAY_KES must be positive")

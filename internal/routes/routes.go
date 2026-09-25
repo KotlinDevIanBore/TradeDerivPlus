@@ -88,6 +88,9 @@ func New(d Deps) *gin.Engine {
 	// Both answer 200 always, like the deposit callback.
 	v1.POST("/mpesa/b2c/result", d.Handler.Wallet.B2CResult(d.Payouts))
 	v1.POST("/mpesa/b2c/timeout", d.Handler.Wallet.B2CTimeout(d.Payouts))
+	// And a third, for status-query answers: a different document from a payout
+	// result, whose non-zero codes mean the query failed rather than the payout.
+	v1.POST("/mpesa/b2c/status", d.Handler.Wallet.B2CStatusResult(d.Payouts))
 
 	protected := v1.Group("", middleware.Auth(d.Auth), middleware.RateLimit(rate.Limit(20), 60))
 	{

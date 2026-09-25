@@ -177,6 +177,25 @@ func (h *WalletHandler) B2CTimeout(payouts *service.MpesaPayoutService) gin.Hand
 	return h.b2cCallback(payouts, mpesaclient.ArrivedAtTimeoutURL)
 }
 
+// B2CStatusResult is a third route, for the answers to questions the
+// reconciliation pass asked. A Transaction Status result is a different document
+// from a payout result, and the rule that separates them is load-bearing: a
+// non-zero result code here means the QUERY failed, not the payout. Handing both
+// to one handler would let a failed question look like a failed payout.
+func (h *WalletHandler) B2CStatusResult(payouts *service.MpesaPayoutService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+		if err == nil {
+			if err := payouts.HandleStatusResult(c.Request.Context(), body, mpesaclient.ArrivedAtResultURL); err != nil {
+				_ = c.Error(err)
+			}
+		} else {
+			_ = c.Error(err)
+		}
+		c.JSON(http.StatusOK, gin.H{"ResultCode": 0, "ResultDesc": "Accepted"})
+	}
+}
+
 func (h *WalletHandler) b2cCallback(payouts *service.MpesaPayoutService, arrival mpesaclient.PayoutArrival) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))

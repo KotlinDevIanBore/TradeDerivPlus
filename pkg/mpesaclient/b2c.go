@@ -256,12 +256,22 @@ func (c *Client) ValidateB2CConfig() error {
 	if c.b2cTimeoutURL == "" {
 		missing = append(missing, "B2C queue-timeout URL")
 	}
+	if c.b2cStatusResultURL == "" {
+		missing = append(missing, "B2C status-result URL")
+	}
 	if len(missing) > 0 {
 		return fmt.Errorf("b2c is not configured: missing %s", strings.Join(missing, ", "))
 	}
 	if c.b2cResultURL == c.b2cTimeoutURL {
 		return errors.New("b2c result and queue-timeout URLs must differ: a timeout means " +
 			"'we do not know', and one handler for both cannot tell it from a failure")
+	}
+	// The same argument, one step along: a status-query answer and a payout result
+	// are different documents, and a handler that has to guess which arrived is a
+	// handler that can classify a query's own failure as the payout's.
+	if c.b2cStatusResultURL == c.b2cResultURL || c.b2cStatusResultURL == c.b2cTimeoutURL {
+		return errors.New("b2c status-result URL must differ from the payout result and " +
+			"queue-timeout URLs: a status answer is a different document from a payout result")
 	}
 	return nil
 }
@@ -534,7 +544,7 @@ func (c *Client) QueryTransactionStatus(ctx context.Context, r StatusRequest) (*
 		"CommandID":          "TransactionStatusQuery",
 		"PartyA":             c.shortcode,
 		"IdentifierType":     "4", // 4 = organisation shortcode
-		"ResultURL":          c.b2cResultURL,
+		"ResultURL":          c.b2cStatusResultURL,
 		"QueueTimeOutURL":    c.b2cTimeoutURL,
 		"Remarks":            remarks,
 	}

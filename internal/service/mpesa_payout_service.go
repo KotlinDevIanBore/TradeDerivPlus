@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -70,6 +71,40 @@ type payoutQuerier interface {
 // all day.
 const firstQueryDelay = 3 * time.Minute
 
+// payoutBackoff is how long to wait after the n-th status query that did not
+// resolve a payout. PROVISIONAL; the shape — widen, then hold — is not.
+//
+// Longer at the top than the deposit ladder because each rung here costs two
+// round trips rather than one: the query is asynchronous, so asking again before
+// the previous answer has had time to arrive asks about something already in
+// flight.
+var payoutBackoff = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
+
+func payoutBackoffAfter(attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	if attempts > len(payoutBackoff) {
+		attempts = len(payoutBackoff)
+	}
+	return payoutBackoff[attempts-1]
+}
+
+// payoutBatch bounds one pass.
+const payoutBatch = 100
+
+// payoutQueryTimeout bounds one status request so a hung Daraja cannot hold a
+// pass, and the payouts behind it, for the client's full timeout per row.
+const payoutQueryTimeout = 15 * time.Second
+
+// What the pass did with one payout; the label on mpesa_payout_queries_total.
+const (
+	PayoutQueryAsked          = "queried"         // a status query was issued and the schedule advanced
+	PayoutQueryGaveUp         = "gave_up"         // past the horizon; taken off the schedule for an operator
+	PayoutQueryError          = "error"           // we could not ask; NOT an attempt, the row keeps its schedule
+	PayoutQueryAlreadySettled = "already_settled" // settled between the pass reading it and writing to it
+)
+
 type MpesaPayoutService struct {
 	store  *repository.Store
 	client *mpesaclient.Client
@@ -77,7 +112,20 @@ type MpesaPayoutService struct {
 	cfg    *config.Config
 	log    *slog.Logger
 
-	onResult func(ctx context.Context, s PayoutSettlement)
+	onResult  func(ctx context.Context, s PayoutSettlement)
+	onSettled func(outcome string)
+	onQueried func(outcome string)
+	onFloat   func(availableKES string)
+
+	// querier is the status query. Nil in mock mode, where nothing is asked: the
+	// simulator answers on its own and a pass with nothing to ask would only
+	// advance backoffs. The pass still runs, so the listing, the schedule and the
+	// give-up horizon are exercised continuously.
+	querier payoutQuerier
+
+	// passMu keeps ticker passes from stacking. Reconcile itself does not take it,
+	// so tests can run passes concurrently on purpose.
+	passMu sync.Mutex
 
 	// mockDelay is how long the simulator waits before reporting a result.
 	mockDelay time.Duration
@@ -101,6 +149,7 @@ func NewMpesaPayoutService(store *repository.Store, cfg *config.Config, log *slo
 			B2CTimeoutURL:      cfg.MpesaB2CTimeoutURL,
 		})
 		s.sender = s.client
+		s.querier = s.client
 	}
 	return s
 }
@@ -113,6 +162,205 @@ func (s *MpesaPayoutService) OnResult(fn func(ctx context.Context, st PayoutSett
 
 // SetSenderForTest replaces what a payout is sent through.
 func (s *MpesaPayoutService) SetSenderForTest(p payoutSender) { s.sender = p }
+
+// SetQuerierForTest replaces what the pass asks. Production wires the client.
+func (s *MpesaPayoutService) SetQuerierForTest(q payoutQuerier) { s.querier = q }
+
+// OnSettled, OnQueried and OnFloat are the metrics hooks, so this service stays
+// unaware of Prometheus. main wires them.
+func (s *MpesaPayoutService) OnSettled(fn func(outcome string))    { s.onSettled = fn }
+func (s *MpesaPayoutService) OnQueried(fn func(outcome string))    { s.onQueried = fn }
+func (s *MpesaPayoutService) OnFloat(fn func(availableKES string)) { s.onFloat = fn }
+
+func (s *MpesaPayoutService) recordSettled(outcome string) {
+	if s.onSettled != nil {
+		s.onSettled(outcome)
+	}
+}
+
+func (s *MpesaPayoutService) recordQueried(outcome string) {
+	if s.onQueried != nil {
+		s.onQueried(outcome)
+	}
+}
+
+// Start runs the reconciliation pass: once at boot, for whatever a restart left
+// open, then on every tick until ctx is cancelled.
+//
+// The boot pass is inside the goroutine, as the deposit pass learned to do: a
+// pass issues network requests and a boot that waits on a hundred of them is a
+// boot that fails its health check.
+//
+// Must be called after the wallet service has registered OnResult. A pass before
+// that refuses to settle, which is safe but pointless.
+func (s *MpesaPayoutService) Start(ctx context.Context) {
+	go func() {
+		s.tick(ctx)
+		t := time.NewTicker(s.cfg.MpesaPayoutQueryEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				s.tick(ctx)
+			}
+		}
+	}()
+}
+
+func (s *MpesaPayoutService) tick(ctx context.Context) {
+	if !s.passMu.TryLock() {
+		s.log.Warn("payout reconcile: previous pass still running, skipping this tick")
+		return
+	}
+	defer s.passMu.Unlock()
+	s.Reconcile(ctx)
+}
+
+// Reconcile runs one pass over the payouts whose outcome is still open and whose
+// next look has come.
+//
+// It asks; it does not conclude, and it never resends. Asking is all it can do:
+// Daraja's Transaction Status API is asynchronous, so the answer arrives later on
+// the status channel and HandleStatusResult classifies it there. And it does not
+// resend because whether Safaricom deduplicates a repeated request id is unproven
+// — there is deliberately no code here that could.
+//
+// Past the give-up horizon a payout is taken off the schedule and left for a
+// person. That is NOT a refund: the customer's money is already out and nothing
+// has been learned, so refunding would be the same guess 'unknown' exists to
+// refuse.
+//
+// Exported so tests drive it directly; production calls it from Start.
+func (s *MpesaPayoutService) Reconcile(ctx context.Context) {
+	now := time.Now()
+	rows, err := s.store.Payouts.ListDue(ctx, now, payoutBatch)
+	if err != nil {
+		s.log.Warn("payout reconcile: list due", "err", err)
+		return
+	}
+	for i := range rows {
+		if ctx.Err() != nil {
+			return
+		}
+		s.reconcileOne(ctx, &rows[i], now)
+	}
+}
+
+func (s *MpesaPayoutService) reconcileOne(ctx context.Context, row *models.MpesaPayout, now time.Time) {
+	age := now.Sub(row.CreatedAt)
+	if age > s.cfg.MpesaPayoutGiveUp {
+		reason := "gave up asking after " + age.Round(time.Minute).String() + "; needs an operator"
+		won, err := s.store.Payouts.MarkGaveUp(ctx, row.OriginatorConversationID, reason)
+		if err != nil {
+			s.log.Warn("payout reconcile: mark gave up", "originator", row.OriginatorConversationID, "err", err)
+			s.recordQueried(PayoutQueryError)
+			return
+		}
+		if !won {
+			s.recordQueried(PayoutQueryAlreadySettled)
+			return
+		}
+		// Loud, because the customer's money is out and nobody automated is
+		// looking any more.
+		s.log.Error("payout reconcile: GIVING UP; a debited customer has no answer and no process left",
+			"originator", row.OriginatorConversationID, "transaction", row.TransactionID,
+			"status", row.Status, "age", age.Round(time.Minute), "attempts", row.ReconcileAttempts)
+		s.recordQueried(PayoutQueryGaveUp)
+		return
+	}
+
+	if s.querier == nil {
+		// Mock mode. Nothing to ask, so the schedule advances and the listing,
+		// the backoff and the horizon stay exercised.
+		s.advanceQuery(ctx, row, now)
+		return
+	}
+
+	qctx, cancel := context.WithTimeout(ctx, payoutQueryTimeout)
+	_, err := s.querier.QueryTransactionStatus(qctx, mpesaclient.StatusRequest{
+		OriginatorConversationID: row.OriginatorConversationID,
+		Remarks:                  "withdrawal status check",
+	})
+	cancel()
+	if err != nil {
+		// We could not ask. Not an attempt: the row keeps its schedule, so it is
+		// still due and the next pass asks again. A Daraja outage must not walk
+		// payouts toward the horizon while nobody is able to look at them.
+		s.log.Warn("payout reconcile: could not ask", "originator", row.OriginatorConversationID, "err", err)
+		s.recordQueried(PayoutQueryError)
+		return
+	}
+	s.advanceQuery(ctx, row, now)
+}
+
+// advanceQuery records that a question was asked and when to ask again. The
+// answer, if one comes, arrives on the status channel.
+func (s *MpesaPayoutService) advanceQuery(ctx context.Context, row *models.MpesaPayout, now time.Time) {
+	attempts := row.ReconcileAttempts + 1
+	won, err := s.store.Payouts.MarkQueried(ctx, row.OriginatorConversationID,
+		attempts, now.Add(payoutBackoffAfter(attempts)))
+	if err != nil {
+		s.log.Warn("payout reconcile: mark queried", "originator", row.OriginatorConversationID, "err", err)
+		s.recordQueried(PayoutQueryError)
+		return
+	}
+	if !won {
+		// Settled between the read and this write. The question may still be in
+		// flight; its answer will lose the settle guard, which is correct.
+		s.recordQueried(PayoutQueryAlreadySettled)
+		return
+	}
+	s.recordQueried(PayoutQueryAsked)
+}
+
+// HandleStatusResult is the status channel's handler: Daraja's answer to a
+// question the pass asked.
+//
+// Its own route, because a Transaction Status result is a different document from
+// a payout result and the rule that separates them matters: a non-zero result
+// code HERE means the QUERY failed, not the payout. Nothing about the customer's
+// money follows from a failed question.
+func (s *MpesaPayoutService) HandleStatusResult(ctx context.Context, body []byte, arrival mpesaclient.PayoutArrival) error {
+	result, err := mpesaclient.ParseStatusCallback(body, arrival)
+	if err != nil {
+		return err
+	}
+
+	originator := result.OriginatorConversationID
+	if originator == "" {
+		row, err := s.store.Payouts.GetByConversationID(ctx, result.ConversationID)
+		if err != nil {
+			return fmt.Errorf("status result: no payout for conversation %q: %w", result.ConversationID, err)
+		}
+		originator = row.OriginatorConversationID
+	}
+
+	switch result.Status {
+	case mpesaclient.PayoutSucceeded:
+		s.log.Info("payout status query: daraja reports the customer was paid",
+			"originator", originator, "receipt", result.Receipt)
+		_, err := s.settle(ctx, originator, models.PayoutCompleted, result.ResultCode,
+			result.ResultDesc, result.Receipt, PayoutSettledByQuery, nil)
+		return err
+
+	case mpesaclient.PayoutFailed:
+		s.log.Info("payout status query: daraja reports the payout did not happen",
+			"originator", originator, "result_desc", result.ResultDesc)
+		_, err := s.settle(ctx, originator, models.PayoutFailed, result.ResultCode,
+			result.ResultDesc, "", PayoutSettledByQuery, nil)
+		return err
+
+	default:
+		// The query answered and did not resolve it — including the case where the
+		// QUERY itself failed. Either way nothing is concluded; the schedule the
+		// pass already set stands.
+		s.log.Info("payout status query: still unresolved",
+			"originator", originator, "result_code", result.ResultCode, "arrival_timeout", arrival == mpesaclient.ArrivedAtTimeoutURL)
+		return nil
+	}
+}
 
 // SetMockDelayForTest shortens the simulated callback so a test need not wait.
 func (s *MpesaPayoutService) SetMockDelayForTest(d time.Duration) { s.mockDelay = d }
@@ -249,6 +497,12 @@ func (s *MpesaPayoutService) HandleResult(ctx context.Context, body []byte, arri
 
 	switch result.Status {
 	case mpesaclient.PayoutSucceeded:
+		// Daraja reports the remaining utility float on every successful payout.
+		// Free, and the difference between noticing an empty account before
+		// customers do or after.
+		if s.onFloat != nil && result.UtilityBalance != "" {
+			s.onFloat(result.UtilityBalance)
+		}
 		_, err := s.settle(ctx, originator, models.PayoutCompleted, result.ResultCode,
 			result.ResultDesc, result.Receipt, PayoutSettledByCallback, nil)
 		return err
@@ -344,6 +598,7 @@ func (s *MpesaPayoutService) settle(ctx context.Context, originatorID, status, r
 		return false, nil
 	}
 
+	s.recordSettled(status)
 	s.onResult(ctx, PayoutSettlement{
 		TransactionID: row.TransactionID,
 		Paid:          status == models.PayoutCompleted,

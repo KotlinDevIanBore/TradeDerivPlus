@@ -76,6 +76,7 @@ func (s *b2cStub) client() *Client {
 		SecurityCredential: "already-encrypted-credential",
 		B2CResultURL:       "https://example.invalid/mpesa/b2c/result",
 		B2CTimeoutURL:      "https://example.invalid/mpesa/b2c/timeout",
+		B2CStatusResultURL: "https://example.invalid/mpesa/b2c/status",
 	})
 }
 
@@ -249,12 +250,27 @@ func TestValidateB2CConfigRefusesOneURLForBothChannels(t *testing.T) {
 	same := base
 	same.B2CResultURL = "https://example.invalid/mpesa/b2c/result"
 	same.B2CTimeoutURL = "https://example.invalid/mpesa/b2c/result"
+	same.B2CStatusResultURL = "https://example.invalid/mpesa/b2c/status"
 	err := New(same).ValidateB2CConfig()
 	if err == nil {
 		t.Fatal("one URL for both channels was accepted")
 	}
 	if !strings.Contains(err.Error(), "must differ") {
 		t.Fatalf("error %q does not explain why", err)
+	}
+
+	// The same rule one step along: a status answer must not land where a payout
+	// result lands, or the handler has to guess which document it is holding.
+	statusClash := base
+	statusClash.B2CResultURL = "https://example.invalid/mpesa/b2c/result"
+	statusClash.B2CTimeoutURL = "https://example.invalid/mpesa/b2c/timeout"
+	statusClash.B2CStatusResultURL = "https://example.invalid/mpesa/b2c/result"
+	if err := New(statusClash).ValidateB2CConfig(); err == nil {
+		t.Fatal("the status-result URL was allowed to equal the payout result URL")
+	}
+	statusClash.B2CStatusResultURL = "https://example.invalid/mpesa/b2c/timeout"
+	if err := New(statusClash).ValidateB2CConfig(); err == nil {
+		t.Fatal("the status-result URL was allowed to equal the queue-timeout URL")
 	}
 
 	// And a send refuses too, not just the boot check.
@@ -264,10 +280,11 @@ func TestValidateB2CConfigRefusesOneURLForBothChannels(t *testing.T) {
 		t.Fatalf("SendB2C with collapsed URLs returned %v", err)
 	}
 
-	for _, missing := range []string{"InitiatorName", "SecurityCredential", "B2CResultURL", "B2CTimeoutURL"} {
+	for _, missing := range []string{"InitiatorName", "SecurityCredential", "B2CResultURL", "B2CTimeoutURL", "B2CStatusResultURL"} {
 		o := base
 		o.B2CResultURL = "https://example.invalid/r"
 		o.B2CTimeoutURL = "https://example.invalid/t"
+		o.B2CStatusResultURL = "https://example.invalid/s"
 		switch missing {
 		case "InitiatorName":
 			o.InitiatorName = ""
@@ -277,6 +294,8 @@ func TestValidateB2CConfigRefusesOneURLForBothChannels(t *testing.T) {
 			o.B2CResultURL = ""
 		case "B2CTimeoutURL":
 			o.B2CTimeoutURL = ""
+		case "B2CStatusResultURL":
+			o.B2CStatusResultURL = ""
 		}
 		if err := New(o).ValidateB2CConfig(); err == nil {
 			t.Fatalf("a client with no %s claimed to be configured for payouts", missing)
@@ -286,6 +305,7 @@ func TestValidateB2CConfigRefusesOneURLForBothChannels(t *testing.T) {
 	good := base
 	good.B2CResultURL = "https://example.invalid/r"
 	good.B2CTimeoutURL = "https://example.invalid/t"
+	good.B2CStatusResultURL = "https://example.invalid/s"
 	if err := New(good).ValidateB2CConfig(); err != nil {
 		t.Fatalf("a correctly configured client was refused: %v", err)
 	}
@@ -496,6 +516,11 @@ func TestQueryTransactionStatusAsksByTheIDWeChose(t *testing.T) {
 	}
 	if req["ResultURL"] == req["QueueTimeOutURL"] {
 		t.Fatal("the status query collapsed its two URLs")
+	}
+	// A status answer must come back on its own channel, not where payout results
+	// land: the two are different documents.
+	if req["ResultURL"] != "https://example.invalid/mpesa/b2c/status" {
+		t.Fatalf("the status query asks for its answer at %v, want the status channel", req["ResultURL"])
 	}
 	if _, has := req["TransactionID"]; has {
 		t.Fatal("sent an empty TransactionID alongside the conversation id")

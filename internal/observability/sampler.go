@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/KotlinDevIanBore/tradederivplus/internal/models"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 )
 
@@ -25,6 +26,21 @@ func NewStoreSampler(store *repository.Store, connections func() int, staleAfter
 // given up on — or never scheduled — is still in the number.
 func (s *StoreSampler) StaleDeposits(ctx context.Context) (int, error) {
 	return s.store.Mpesa.CountPendingOlderThan(ctx, s.staleAfter)
+}
+
+// UnknownPayouts is the count worth alerting on: money already out of a
+// customer's balance with no answer from Daraja either way.
+func (s *StoreSampler) UnknownPayouts(ctx context.Context) (int, error) {
+	counts, err := s.store.Payouts.CountByStatus(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return counts[models.PayoutUnknown], nil
+}
+
+// GivenUpPayouts counts open payouts nothing is looking at any more.
+func (s *StoreSampler) GivenUpPayouts(ctx context.Context) (int, error) {
+	return s.store.Payouts.CountGivenUp(ctx)
 }
 
 func (s *StoreSampler) OpenTrades(ctx context.Context) (int, error) {

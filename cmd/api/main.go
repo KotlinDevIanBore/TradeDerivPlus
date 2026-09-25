@@ -101,6 +101,9 @@ func run() error {
 	if err := payouts.ValidateConfig(); err != nil {
 		return err
 	}
+	payouts.OnSettled(observability.RecordPayout)
+	payouts.OnQueried(observability.RecordPayoutQuery)
+	payouts.OnFloat(observability.RecordB2CUtilityFloat)
 	trading := service.NewTradingService(store, feed, hub, log)
 	digits := service.NewDigitService(store, feed, hub, service.DigitLimits{
 		MaxStake:          decimal.NewFromFloat(cfg.DigitMaxStake),
@@ -151,6 +154,10 @@ func run() error {
 	// settle rather than consume the guard, so the order is what makes the boot
 	// pass able to credit anything.
 	mpesa.Start(ctx)
+	// The payout pass. After wallet.SetPayouts above, which registered the
+	// settlement handler: a pass that settled with nowhere to send the result
+	// would consume the guard and leave the ledger pending for ever.
+	payouts.Start(ctx)
 	// After digits.Start, whose boot sweep has already settled or voided what it
 	// could: runs left live by the previous process are ended here rather than
 	// resumed, and a contract still open folds into its (now stopped) run through
