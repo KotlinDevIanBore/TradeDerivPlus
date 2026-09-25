@@ -239,8 +239,11 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 	}
 
 	if !r.Success {
-		won, err := s.store.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusFailed,
-			map[string]any{"reason": r.Reason, "settled_by": r.Source})
+		meta := map[string]any{"reason": r.Reason, "settled_by": r.Source}
+		if r.AdminID != nil {
+			meta["admin_id"] = r.AdminID.String()
+		}
+		won, err := s.store.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusFailed, meta)
 		if err != nil {
 			s.log.Error("settle deposit: mark failed", "err", err)
 			return
@@ -275,6 +278,11 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 		if r.Receipt != "" {
 			meta["receipt"] = r.Receipt
 		}
+		if r.AdminID != nil {
+			// The same key Adjust writes, so the console's admin join names the
+			// operator on a resolved deposit exactly as it does on an adjustment.
+			meta["admin_id"] = r.AdminID.String()
+		}
 		won, err := st.Transactions.UpdateStatusIfPending(ctx, tx.ID, models.StatusCompleted, meta)
 		if err != nil {
 			return err
@@ -308,6 +316,7 @@ func (s *WalletService) settleDeposit(ctx context.Context, r DepositResult) {
 		"type":           models.TxDeposit,
 		"amount":         tx.Amount,
 		"receipt":        r.Receipt,
+		"settled_by":     r.Source,
 	})
 	s.notify(tx.AccountID, "wallet", wallet)
 }

@@ -33,6 +33,7 @@ var (
 	ErrPasswordUnchanged  = errors.New("Choose a password you have not used here before")
 	ErrMustChangePassword = errors.New("You must change the default password before continuing")
 	ErrAlreadyReviewed    = errors.New("This submission has already been reviewed")
+	ErrDepositSettled     = errors.New("This deposit has already been settled")
 
 	// Automated runs.
 	ErrBotDisabled          = errors.New("Automated trading is not available on your account yet")

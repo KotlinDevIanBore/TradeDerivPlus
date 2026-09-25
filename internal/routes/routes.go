@@ -172,6 +172,9 @@ func New(d Deps) *gin.Engine {
 		actions.POST("/accounts/:id/adjust", d.Handler.Admin.Adjust)
 		actions.POST("/kyc/:id/approve", d.Handler.Admin.ApproveKYC)
 		actions.POST("/kyc/:id/reject", d.Handler.Admin.RejectKYC)
+		// Settles a stuck deposit's original row, so a late callback credits
+		// nothing. With the money actions because it is one.
+		actions.POST("/deposits/:id/resolve", d.Handler.Admin.ResolveDeposit)
 		// The kill switch belongs with the money actions: it stops every live run
 		// and turns the feature off, and it is audited like the rest.
 		actions.POST("/bot/kill", d.Handler.Admin.KillBots)

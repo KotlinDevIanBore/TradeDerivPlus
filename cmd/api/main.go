@@ -124,6 +124,9 @@ func run() error {
 	// every loop stops on its next check, with these it is immediate.
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
+	// The console settles a stuck deposit through the M-Pesa service, never on
+	// its own: same guards, same lock order as a callback.
+	admin.SetDepositResolver(mpesa)
 
 	go feed.Run(ctx)
 	trading.Start(ctx)

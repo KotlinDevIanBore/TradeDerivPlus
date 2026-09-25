@@ -25,17 +25,33 @@ type DepositResult struct {
 	Success       bool
 	Receipt       string
 	Reason        string
-	// Source is who established the outcome: "callback", or later "query" and
-	// "admin". The ledger records it, because a deposit settled without a
-	// receipt should say how rather than look like a callback that lost one.
+	// Source is who established the outcome: "callback", "query" or "admin".
+	// The ledger records it, because a deposit settled without a receipt should
+	// say how rather than look like a callback that lost one.
 	Source string
+	// AdminID is set only for Source == "admin": the operator who resolved it,
+	// written to the ledger row so the console's admin join surfaces them.
+	AdminID *uuid.UUID
 }
 
 // Settlement sources, as written to transactions.metadata.settled_by.
 const (
 	SettledByCallback = "callback"
 	SettledByQuery    = "query"
+	SettledByAdmin    = "admin"
 )
+
+// ResultCodeAdminFailed is written to mpesa_requests.result_code when an
+// operator closes a deposit as not received. Negative so it can never be
+// mistaken for a Daraja code; Daraja's are all non-negative.
+const ResultCodeAdminFailed = -1
+
+// MockStuckPhone is the one number the mock never calls back for. Every other
+// mock deposit settles in 4–9s; a deposit to this number stays pending until
+// the reconciler (which, in mock mode, never resolves anything) or an operator
+// settles it. It exists so a stuck deposit can be produced on demand — by the
+// admin browser test, and by anyone exercising the console by hand.
+const MockStuckPhone = "254700000000"
 
 // What the reconciliation pass found for one row; the label on
 // mpesa_reconcile_total. One of these per row examined, exactly.
@@ -324,7 +340,7 @@ func (s *MpesaService) InitiateSTK(ctx context.Context, transactionID uuid.UUID,
 		return "", err
 	}
 
-	if s.cfg.UseMockMpesa {
+	if s.cfg.UseMockMpesa && phone != MockStuckPhone {
 		go s.simulateCallback(checkoutID)
 	}
 	if s.afterInitiate != nil {
@@ -363,6 +379,28 @@ func (s *MpesaService) HandleCallback(ctx context.Context, cb mpesaclient.Callba
 // inside the UPDATE, so exactly one caller is told it won, and only that one
 // credits anything.
 func (s *MpesaService) settle(ctx context.Context, checkoutID string, resultCode int, resultDesc, receipt, source string) (bool, error) {
+	return s.settleAs(ctx, checkoutID, resultCode, resultDesc, receipt, source, nil)
+}
+
+// ResolveByAdmin is the console's adapter over settle: an operator states the
+// outcome and the row is settled exactly as a callback would settle it, guards
+// and all. It reports whether this call wrote the outcome; false means the
+// deposit was settled — by a callback or the reconciler — between the operator
+// reading the row and confirming, and nothing was changed.
+//
+// It takes no wallet lock of its own and runs in no transaction of its own:
+// the credit happens in settleDeposit, in the transactions-row → wallets-row
+// order every other settlement uses.
+func (s *MpesaService) ResolveByAdmin(ctx context.Context, checkoutID string, received bool, adminID uuid.UUID) (bool, error) {
+	if received {
+		return s.settleAs(ctx, checkoutID, 0, "Confirmed by support", "", SettledByAdmin, &adminID)
+	}
+	return s.settleAs(ctx, checkoutID, ResultCodeAdminFailed,
+		"Closed by support as not received. If M-Pesa charged you, contact support with your phone number.",
+		"", SettledByAdmin, &adminID)
+}
+
+func (s *MpesaService) settleAs(ctx context.Context, checkoutID string, resultCode int, resultDesc, receipt, source string, adminID *uuid.UUID) (bool, error) {
 	// Refuse, rather than win the guard with nowhere to send the result. With no
 	// handler the mpesa_requests row would go terminal and the ledger would stay
 	// pending for ever — every later attempt loses the guard this one consumed.
@@ -413,6 +451,7 @@ func (s *MpesaService) settle(ctx context.Context, checkoutID string, resultCode
 		Receipt:       receipt,
 		Reason:        humanResult(resultCode, resultDesc),
 		Source:        source,
+		AdminID:       adminID,
 	})
 	return true, nil
 }

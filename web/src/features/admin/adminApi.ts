@@ -154,6 +154,14 @@ export const adminApi = {
       `/admin/accounts/${accountId}/adjust`, 'POST', { amount, balance_type, reason },
     ),
 
+  /**
+   * Settles a stuck deposit's original ledger row, through the same path a
+   * callback takes — so a callback that turns up later credits nothing. This,
+   * not adjust, is how a deposit that never got its callback is closed.
+   */
+  resolveDeposit: (id: string, outcome: 'completed' | 'failed', reason: string) =>
+    request<AdminTransaction>(`/admin/deposits/${id}/resolve`, 'POST', { outcome, reason }),
+
   approveKYC: (id: string) => request<KYCSubmission>(`/admin/kyc/${id}/approve`, 'POST', {}),
 
   rejectKYC: (id: string, reason: string) =>

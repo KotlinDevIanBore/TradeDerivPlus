@@ -110,6 +110,7 @@ export type AuditAction =
   | 'bot_kill'
   | 'bot_enable'
   | 'bot_run_stop'
+  | 'deposit_resolve'
 
 /**
  * A run as the console sees it: the run row plus whose it is. The user app's

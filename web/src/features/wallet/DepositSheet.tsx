@@ -89,12 +89,15 @@ export function DepositSheet({
   const canSubmit = !amountError && !phoneError && amount !== '' && phone !== ''
 
   // Poll the transaction while pending, as a fallback to the account socket.
+  // Keeps polling after the sheet has given up too: the server is still
+  // asking M-Pesa about the deposit, and if it settles while this is open the
+  // screen should say so rather than leave the customer on "still waiting".
   useEffect(() => {
-    if (step !== 'pending' || !transactionRef.current) return
+    if ((step !== 'pending' && step !== 'timeout') || !transactionRef.current) return
 
     const startedAt = Date.now()
     const id = setInterval(async () => {
-      if (Date.now() - startedAt > GIVE_UP_AFTER_MS) {
+      if (step === 'pending' && Date.now() - startedAt > GIVE_UP_AFTER_MS) {
         clearInterval(id)
         setStep('timeout')
         return
@@ -257,6 +260,11 @@ export function DepositSheet({
           <h3 className="mt-4 text-title font-bold tracking-tight">{kes(amount)} deposited</h3>
           <p className="mt-2 text-body text-muted">
             {money(settled?.amount)} is now in your balance.
+            {settled?.metadata?.settled_by === 'query'
+              ? ' M-Pesa confirmed the payment when we checked.'
+              : settled?.metadata?.settled_by === 'admin'
+                ? ' Our support team confirmed the payment.'
+                : ''}
           </p>
 
           {/* One button, because there is one thing to do: the chart is behind
@@ -287,21 +295,19 @@ export function DepositSheet({
         </div>
       ) : null}
 
-      {/* Nothing is watching this deposit once the sheet gives up: settlement
-          only ever arrives from M-Pesa's callback, and if that is lost rather
-          than slow, it never arrives. So the copy does not say the balance will
-          fix itself, and does not say we are checking — neither is true today.
-          It says what is known, and points at the one thing that can resolve
-          it, which is a person.
-
-          When the reconciliation pass exists this becomes a different screen:
-          "we're checking" will be true, and it should say so then. */}
+      {/* The server keeps asking M-Pesa about this deposit after the sheet gives
+          up — a few minutes in, then less often, for a day — and credits it if
+          M-Pesa confirms the payment. So "we're checking" is true and the copy
+          says so. It does not promise when: the check runs on M-Pesa's clock,
+          not ours, and a lost callback can take hours to show as paid. What it
+          does promise is what the customer must not do, and where to go. */}
       {step === 'timeout' ? (
         <div className="py-6 text-center">
           <h3 className="text-title font-bold tracking-tight">Still waiting on M-Pesa</h3>
           <p className="mx-auto mt-2 max-w-[36ch] text-body text-muted">
-            We haven't had confirmation from M-Pesa. If your phone says the payment went through,
-            don't pay again — contact support with your phone number and we'll sort it out.
+            We haven't had confirmation from M-Pesa yet. We'll keep checking with them and credit
+            your balance if the payment went through — this can take a while. Don't pay again.
+            If it isn't there within a day, contact support with your phone number.
           </p>
 
           <div className="mt-6 space-y-2">

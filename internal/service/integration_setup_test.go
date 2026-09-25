@@ -186,6 +186,7 @@ func newHarness(t *testing.T) *harness {
 	// the switch exercises the immediate stop rather than only the row update.
 	admin.SetBotStopper(bots)
 	admin.SetSettingsCache(settings)
+	admin.SetDepositResolver(mpesa)
 	// Poll fast: settlement in a test is driven by an injected tick, not by a
 	// clock, so the only thing a real poll interval would add is waiting.
 	bots.SetPollInterval(5 * time.Millisecond)

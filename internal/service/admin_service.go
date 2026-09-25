@@ -42,7 +42,23 @@ type AdminService struct {
 	// the database half works without them, these make it immediate.
 	bots          botStopper
 	settingsCache interface{ BustCache() }
+
+	// deposits is the M-Pesa service, through the one method the console needs:
+	// settle the original row. Nil until main wires it; ResolveDeposit refuses
+	// rather than settle by any other route.
+	deposits depositResolver
 }
+
+// depositResolver is what ResolveDeposit needs from MpesaService. The console
+// never writes a deposit outcome itself — it asks the service that owns the
+// callback path to write it, so the guards and the lock order are shared.
+type depositResolver interface {
+	ResolveByAdmin(ctx context.Context, checkoutID string, received bool, adminID uuid.UUID) (bool, error)
+}
+
+// SetDepositResolver wires the M-Pesa service in. main.go calls it; the harness
+// mirrors it.
+func (s *AdminService) SetDepositResolver(r depositResolver) { s.deposits = r }
 
 func NewAdminService(store *repository.Store, hub Broadcaster, cfg *config.Config, log *slog.Logger) *AdminService {
 	return &AdminService{store: store, hub: hub, cfg: cfg, log: log}
@@ -237,6 +253,88 @@ func (s *AdminService) fired(action string) {
 	if s.onAction != nil {
 		s.onAction(action)
 	}
+}
+
+// Deposit outcomes an operator may state.
+const (
+	DepositOutcomeCompleted = "completed"
+	DepositOutcomeFailed    = "failed"
+)
+
+// ResolveDeposit settles a pending deposit on an operator's say-so: the
+// customer's statement plus Safaricom's portal, when the callback never came
+// and the reconciler could not tell. It settles the ORIGINAL row through the
+// callback's own path, which is the whole point — a late callback then loses
+// its guard and credits nothing. Adjust cannot offer that: an adjustment is a
+// new row, and a late callback still credits the deposit it never knew about.
+//
+// The audit row is written after the settlement, in its own transaction. They
+// cannot share one: the credit belongs to settleDeposit's transaction, whose
+// lock order every settlement must keep, and the console's audit must not be
+// the first path to take the wallet lock from outside it. The ledger row itself
+// records the operator (metadata.admin_id, settled_by = admin), so the money
+// is attributed even if the process died between the two writes.
+func (s *AdminService) ResolveDeposit(ctx context.Context, adminID, txID uuid.UUID, outcome, reason string) (*models.Transaction, error) {
+	trimmed, err := requireReason(reason)
+	if err != nil {
+		return nil, err
+	}
+	if outcome != DepositOutcomeCompleted && outcome != DepositOutcomeFailed {
+		return nil, invalid("outcome", "Outcome must be completed or failed")
+	}
+	if s.deposits == nil {
+		return nil, errors.New("deposit resolve: no M-Pesa service wired")
+	}
+
+	tx, err := s.store.Transactions.GetByID(ctx, txID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if tx.Type != models.TxDeposit {
+		return nil, invalid("transaction", "Only a deposit can be resolved")
+	}
+	if tx.Status != models.StatusPending {
+		return nil, ErrDepositSettled
+	}
+	checkoutID, _ := tx.Metadata["checkout_request_id"].(string)
+	if checkoutID == "" {
+		return nil, invalid("transaction", "This deposit has no M-Pesa request to resolve")
+	}
+
+	won, err := s.deposits.ResolveByAdmin(ctx, checkoutID, outcome == DepositOutcomeCompleted, adminID)
+	if err != nil {
+		return nil, err
+	}
+	if !won {
+		// Settled between the operator's read and their confirm. Nothing was
+		// written by us and there is nothing to audit; the row says who did.
+		return nil, ErrDepositSettled
+	}
+
+	account, err := s.store.Accounts.GetByID(ctx, tx.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	err = s.store.WithTx(ctx, func(st *repository.Store) error {
+		return s.audit(ctx, st, adminID, models.ActionDepositResolve, models.TargetTransaction, tx.ID, trimmed,
+			map[string]any{
+				"account_number":      account.AccountNumber,
+				"account_id":          tx.AccountID.String(),
+				"checkout_request_id": checkoutID,
+				"outcome":             outcome,
+				"amount":              tx.Amount.String(),
+				"balance_type":        tx.BalanceType,
+			})
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.fired(models.ActionDepositResolve)
+
+	return s.store.Transactions.GetByID(ctx, txID)
 }
 
 // requireReason enforces the console's rule that nothing which touches money

@@ -226,6 +226,10 @@ const (
 	// switch also turns the feature off for everyone, and an audit log that
 	// filed both under one name could not tell the two apart.
 	ActionBotRunStop = "bot_run_stop"
+	// ActionDepositResolve settles a pending deposit from the console — the
+	// original ledger row, through the same path a callback takes, so a late
+	// callback afterwards credits nothing.
+	ActionDepositResolve = "deposit_resolve"
 )
 
 const (

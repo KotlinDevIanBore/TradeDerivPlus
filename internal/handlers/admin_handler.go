@@ -325,6 +325,32 @@ func (h *AdminHandler) accountParam(c *gin.Context) (uuid.UUID, bool) {
 	return accountID, true
 }
 
+// POST /admin/deposits/:id/resolve  {outcome: completed|failed, reason}
+//
+// Settles a stuck deposit's original row. A reason is required, like every
+// other action that touches money; the outcome is the operator's statement of
+// what Safaricom's records show.
+func (h *AdminHandler) ResolveDeposit(c *gin.Context) {
+	txID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		badRequest(c, "A valid transaction id is required", "")
+		return
+	}
+
+	var req struct {
+		Outcome string `json:"outcome"`
+		Reason  string `json:"reason"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	tx, err := h.admin.ResolveDeposit(c.Request.Context(), middleware.AdminID(c), txID, req.Outcome, req.Reason)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, tx)
+}
+
 // --- Automated trading -----------------------------------------------------
 
 // POST /admin/bot/enable
