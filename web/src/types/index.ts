@@ -2,7 +2,7 @@
 // so no precision is lost to float parsing; parse them with Decimal from
 // lib/money before doing arithmetic.
 
-export type KYCStatus = 'pending' | 'verified' | 'rejected'
+export type KYCStatus = 'unverified' | 'pending' | 'verified' | 'rejected'
 export type AccountType = 'demo' | 'real'
 export type Direction = 'buy' | 'sell'
 export type TradeStatus = 'open' | 'closed'

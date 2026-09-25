@@ -15,6 +15,7 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/observability"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 )
 
 // Deps is everything the router needs. main builds it; routes only wires it.
@@ -35,7 +36,12 @@ type Deps struct {
 		Market  *handlers.MarketHandler
 		WS      *handlers.WSHandler
 		Admin   *handlers.AdminHandler
+		KYC     *handlers.KYCHandler
 	}
+	// DocumentStub is set only when no object store is configured. Its presence is
+	// what registers the development upload route, so a deployment with a real
+	// bucket does not have that route at all.
+	DocumentStub *storage.Stub
 }
 
 func New(d Deps) *gin.Engine {
@@ -92,6 +98,15 @@ func New(d Deps) *gin.Engine {
 	// result, whose non-zero codes mean the query failed rather than the payout.
 	v1.POST("/mpesa/b2c/status", d.Handler.Wallet.B2CStatusResult(d.Payouts))
 
+	// Development only. Registered when there is no object store, so the browser
+	// can complete a real upload round trip against the in-memory stub. Public for
+	// the same reason a presigned URL is: the signature is the credential, and the
+	// stub verifies it.
+	if d.DocumentStub != nil {
+		v1.PUT("/kyc/stub-upload/*key",
+			handlers.StubUploadHandler(d.DocumentStub, d.Config.KYCMaxDocumentBytes))
+	}
+
 	protected := v1.Group("", middleware.Auth(d.Auth), middleware.RateLimit(rate.Limit(20), 60))
 	{
 		protected.GET("/auth/me", d.Handler.Auth.Me)
@@ -103,6 +118,15 @@ func New(d Deps) *gin.Engine {
 		protected.GET("/wallet/transactions", d.Handler.Wallet.Transactions)
 		protected.GET("/wallet/transactions/:id", d.Handler.Wallet.Transaction)
 		protected.GET("/wallet/rate", d.Handler.Wallet.Rate)
+
+		// Identity verification. Its own bucket because each call either signs a
+		// URL or reads an object out of the store, and neither should be free to
+		// call in a loop. Deliberately looser than `money`: a user correcting a
+		// rejected upload may legitimately try several times in a row.
+		kyc := protected.Group("", middleware.RateLimit(rate.Every(time.Second), 10))
+		kyc.GET("/kyc/state", d.Handler.KYC.State)
+		kyc.POST("/kyc/upload-url", d.Handler.KYC.UploadURL)
+		kyc.POST("/kyc/submit", d.Handler.KYC.Submit)
 
 		// Money movement gets its own tighter bucket on top of the group's.
 		money := protected.Group("", middleware.RateLimit(rate.Every(2*time.Second), 5))
@@ -181,6 +205,9 @@ func New(d Deps) *gin.Engine {
 		actions.POST("/accounts/:id/freeze", d.Handler.Admin.Freeze)
 		actions.POST("/accounts/:id/unfreeze", d.Handler.Admin.Unfreeze)
 		actions.POST("/accounts/:id/adjust", d.Handler.Admin.Adjust)
+		// Signing a URL for an identity document writes an audit row, so it is a
+		// POST among the audited actions rather than a GET among the reads.
+		actions.POST("/kyc/:id/document-url", d.Handler.Admin.KYCDocumentURL)
 		actions.POST("/kyc/:id/approve", d.Handler.Admin.ApproveKYC)
 		actions.POST("/kyc/:id/reject", d.Handler.Admin.RejectKYC)
 		// Settles a stuck deposit's original row, so a late callback credits

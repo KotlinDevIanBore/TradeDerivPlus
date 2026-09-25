@@ -46,6 +46,10 @@ const actionTone: Record<AuditAction, string> = {
   manual_adjustment: 'border-accent/40 text-accent',
   kyc_approve: 'border-profit/40 text-profit',
   kyc_reject: 'border-accent/40 text-accent',
+  // Muted, unlike the rest: looking at a document changes nothing and moves no
+  // money. It is logged because it is access to the most sensitive data here, not
+  // because it is the kind of row that should colour a day.
+  kyc_document_view: 'border-border text-muted',
   // Both stop someone trading, so both read as destructive. The kill switch is
   // the platform-wide one and is not distinguished by colour — the label is what
   // separates them, and colour is for the kind of day, not the blast radius.
@@ -68,6 +72,7 @@ const actionLabel: Record<AuditAction, string> = {
   manual_adjustment: 'Adjusted balance',
   kyc_approve: 'Approved KYC',
   kyc_reject: 'Rejected KYC',
+  kyc_document_view: 'Viewed an ID document',
   bot_kill: 'Stopped all auto runs',
   bot_enable: 'Turned auto runs back on',
   bot_run_stop: 'Stopped an auto run',

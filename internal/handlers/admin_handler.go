@@ -295,6 +295,26 @@ func (h *AdminHandler) Adjust(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"transaction": tx, "wallet": wallet})
 }
 
+// KYCDocumentURL hands back a short-lived URL for one submission's document.
+//
+// A POST, not a GET, and in the audited actions group rather than among the
+// reads: it writes an admin_audit_log row, so it changes state. Treating it as a
+// read would put a state change behind a verb that callers, proxies and browsers
+// all assume is safe to repeat.
+func (h *AdminHandler) KYCDocumentURL(c *gin.Context) {
+	submissionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		badRequest(c, "Invalid submission id", "")
+		return
+	}
+	url, err := h.admin.KYCDocumentURL(c.Request.Context(), middleware.AdminID(c), submissionID)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": url})
+}
+
 func (h *AdminHandler) ApproveKYC(c *gin.Context) { h.reviewKYC(c, true) }
 func (h *AdminHandler) RejectKYC(c *gin.Context)  { h.reviewKYC(c, false) }
 

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { accountsApi } from '@/api/accounts'
 import { authApi } from '@/api/auth'
+import { kycApi } from '@/api/kyc'
 import { botApi, type StartRunInput } from '@/api/bot'
 import { digitApi, type OpenDigitInput } from '@/api/digit'
 import { marketApi } from '@/api/market'
@@ -41,6 +42,22 @@ export function useCreateAccount() {
   return useMutation({
     mutationFn: (accountType: AccountType) => accountsApi.create(accountType),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.accounts() }),
+  })
+}
+
+/**
+ * Verification status, and whether an upload was started and never finished.
+ *
+ * Separate from `useMe` because it answers a different question: `me` carries the
+ * status, this also carries the unfinished-attempt flag that decides between
+ * "Start verification" and "Continue".
+ */
+export function useKYCState() {
+  const enabled = useSessionStore((s) => s.accessToken !== null)
+  return useQuery({
+    queryKey: queryKeys.kycState(),
+    queryFn: () => kycApi.state(),
+    enabled,
   })
 }
 

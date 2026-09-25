@@ -1,0 +1,138 @@
+package handlers
+
+import (
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"github.com/KotlinDevIanBore/tradederivplus/internal/middleware"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
+)
+
+// KYCHandler is the user-facing side of identity verification: ask for somewhere
+// to put a document, then say it is there.
+//
+// The bytes never pass through this API. The client uploads them straight to the
+// object store with a signed URL, which keeps a 10 MiB body off the application
+// and means no request-size limit is needed here.
+type KYCHandler struct {
+	kyc *service.KYCService
+}
+
+func NewKYCHandler(kyc *service.KYCService) *KYCHandler {
+	return &KYCHandler{kyc: kyc}
+}
+
+type uploadURLRequest struct {
+	ContentType string `json:"content_type"`
+	SizeBytes   int64  `json:"size_bytes"`
+}
+
+// UploadURL issues a presigned PUT for exactly one document.
+//
+// The declared type and size are checked here and signed into the URL, so the
+// browser cannot then upload something else: a mismatch is refused by the store
+// before any byte is stored. What it can still do is send bytes that are not
+// really the type they claim, which is why Confirm sniffs the stored object.
+func (h *KYCHandler) UploadURL(c *gin.Context) {
+	var req uploadURLRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, "Tell us the file type and size", "")
+		return
+	}
+
+	target, err := h.kyc.PresignUpload(c.Request.Context(), middleware.UserID(c), req.ContentType, req.SizeBytes)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, target)
+}
+
+type submitRequest struct {
+	AttemptID string `json:"attempt_id"`
+	IDNumber  string `json:"id_number"`
+}
+
+// Submit says the document is in the bucket. Everything the client claimed at
+// presign time is re-checked here against what is actually stored, including a
+// content sniff, so a label cannot stand in for the bytes.
+func (h *KYCHandler) Submit(c *gin.Context) {
+	var req submitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		badRequest(c, "Tell us which upload to confirm", "")
+		return
+	}
+	attemptID, err := uuid.Parse(req.AttemptID)
+	if err != nil {
+		badRequest(c, "Invalid upload id", "attempt_id")
+		return
+	}
+
+	submission, err := h.kyc.Submit(c.Request.Context(), middleware.UserID(c), attemptID, req.IDNumber)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, submission)
+}
+
+// State reports where the caller stands, including whether an upload was started
+// and never finished — which is what lets the client offer "continue" instead of
+// starting over silently.
+func (h *KYCHandler) State(c *gin.Context) {
+	state, err := h.kyc.State(c.Request.Context(), middleware.UserID(c))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, state)
+}
+
+// StubUpload receives a document upload when no object store is configured.
+//
+// It exists so the whole verification flow — including the browser's PUT to a
+// signed URL — works in local development, CI and the browser suite with no
+// bucket and no credentials, which is what makes the stub honest rather than a
+// thing only Go tests can reach.
+//
+// It is registered ONLY when the store is the in-memory stub (see routes.go), so
+// a deployment with R2 configured does not have this route at all. It is
+// unauthenticated for the same reason a real presigned URL is: the signature is
+// the credential, and the stub checks it — an unsigned key, an expired URL, or a
+// type or length that does not match what was signed are all refused.
+func StubUploadHandler(stub *storage.Stub, maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		key := strings.TrimPrefix(c.Param("key"), "/")
+		if key == "" {
+			badRequest(c, "Missing object key", "")
+			return
+		}
+		// Bounded read: this is the one place in this API where a request body can
+		// be a document rather than a small JSON object.
+		body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes+1))
+		if err != nil {
+			badRequest(c, "Could not read the upload", "")
+			return
+		}
+		if int64(len(body)) > maxBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": gin.H{
+				"message": "That file is too large", "code": "too_large",
+			}})
+			return
+		}
+		if err := stub.AcceptUpload(key, c.GetHeader("Content-Type"), body); err != nil {
+			// The same 403 a real store answers with when a signature does not
+			// match what was presented.
+			c.JSON(http.StatusForbidden, gin.H{"error": gin.H{
+				"message": err.Error(), "code": "signature_mismatch",
+			}})
+			return
+		}
+		c.Status(http.StatusOK)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
 	"golang.org/x/crypto/bcrypt"
 
@@ -140,8 +141,6 @@ func seedKYC(ctx context.Context, store *repository.Store, cfg *config.Config) e
 		return nil
 	}
 
-	const placeholderDoc = "PLACEHOLDER — no upload flow yet"
-
 	for i := 1; i <= 3; i++ {
 		phone := fmt.Sprintf("2547%08d", 10000000+i)
 
@@ -179,16 +178,23 @@ func seedKYC(ctx context.Context, store *repository.Store, cfg *config.Config) e
 			return err
 		}
 
+		// No document_key, deliberately. The seed process has its own in-memory
+		// stub, separate from the API's, so any key written here would name an
+		// object the console could never fetch — and the queue would show a View
+		// button that always failed. Empty renders as "None", which is true.
+		//
+		// The id is minted here because Create no longer generates one: in the real
+		// flow it comes from the presign step, embedded in the object key.
 		if err := store.KYC.Create(ctx, &models.KYCSubmission{
-			UserID:      user.ID,
-			IDNumber:    fmt.Sprintf("2%07d", 1000000+i),
-			DocumentURL: placeholderDoc,
+			ID:       uuid.New(),
+			UserID:   user.ID,
+			IDNumber: fmt.Sprintf("2%07d", 1000000+i),
 		}); err != nil {
 			return err
 		}
 	}
 
-	fmt.Println("created 3 pending KYC submissions with placeholder documents")
+	fmt.Println("created 3 pending KYC submissions (no documents: upload one through the app to see the viewer)")
 	return nil
 }
 

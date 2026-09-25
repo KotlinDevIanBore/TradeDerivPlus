@@ -4,6 +4,8 @@
  */
 export const queryKeys = {
   me: () => ['me'] as const,
+  /** Verification status plus whether an upload was started and never finished. */
+  kycState: () => ['kycState'] as const,
   accounts: () => ['accounts'] as const,
   wallet: (accountId: string) => ['wallet', accountId] as const,
   transactions: (accountId: string, filters?: unknown) =>

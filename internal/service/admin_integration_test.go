@@ -253,9 +253,14 @@ func TestKYCReviewMovesUserAndSubmissionTogether(t *testing.T) {
 	userID, accountID := h.newUser(decimal.Zero)
 
 	submission := &models.KYCSubmission{
+		// Create no longer generates the id: it is minted at presign in the real
+		// flow and embedded in the object key.
+		ID:          uuid.New(),
 		UserID:      userID,
 		IDNumber:    "21234567",
-		DocumentURL: "PLACEHOLDER — no upload flow yet",
+		DocumentKey: "kyc/" + userID.String() + "/fixture.jpg",
+		ContentType: "image/jpeg",
+		SizeBytes:   2048,
 	}
 	if err := h.store.KYC.Create(h.ctx, submission); err != nil {
 		t.Fatal(err)

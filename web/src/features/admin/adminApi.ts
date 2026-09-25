@@ -179,6 +179,15 @@ export const adminApi = {
   resolvePayout: (transactionId: string, outcome: 'paid' | 'failed' | 'never_received', reason: string) =>
     request<AdminTransaction>(`/admin/payouts/${transactionId}/resolve`, 'POST', { outcome, reason }),
 
+  /**
+   * A short-lived URL for one submission's document, minted per click.
+   *
+   * A POST because it writes an audit row: looking at someone's identity document
+   * is recorded, so the request is not the safe, repeatable read a GET implies.
+   */
+  kycDocumentURL: (id: string) =>
+    request<{ url: string }>(`/admin/kyc/${id}/document-url`, 'POST', {}),
+
   approveKYC: (id: string) => request<KYCSubmission>(`/admin/kyc/${id}/approve`, 'POST', {}),
 
   rejectKYC: (id: string, reason: string) =>

@@ -321,7 +321,7 @@ export async function originatorFor(transactionId: string) {
 }
 
 /** An admin access token, for setup a test needs but is not testing. */
-async function adminToken() {
+export async function adminToken() {
   for (const password of ADMIN_PASSWORDS) {
     const res = await api('/admin/login', { method: 'POST', body: { username: 'admin', password } })
     if (res.ok) {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/KotlinDevIanBore/tradederivplus/internal/repository"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/routes"
 	"github.com/KotlinDevIanBore/tradederivplus/internal/service"
+	"github.com/KotlinDevIanBore/tradederivplus/internal/storage"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/derivclient"
 	"github.com/KotlinDevIanBore/tradederivplus/pkg/ws"
 )
@@ -116,6 +118,59 @@ func run() error {
 	wallet.OnDepositSettled(observability.RecordDeposit)
 	mpesa.OnReconcile(observability.RecordReconcile)
 
+	// Object storage for identity documents.
+	//
+	// Three outcomes, not two. Configured: the real client. Unconfigured outside
+	// production: an in-memory stub, so seed fixtures, CI and local development
+	// exercise the whole flow without a bucket. Unconfigured IN production: no
+	// store at all, and the endpoints refuse with 503.
+	//
+	// That third case matters. An earlier version fell back to the stub whatever
+	// the environment, which in production would have accepted identity documents
+	// into memory, told the customer they were submitted, shown an operator a
+	// submission with nothing behind it, and lost everything on the next restart.
+	var docs service.DocumentStore
+	var documentStub *storage.Stub
+	if cfg.R2AccountID != "" {
+		r2, err := storage.New(storage.Config{
+			AccountID:       cfg.R2AccountID,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			BucketName:      cfg.R2BucketName,
+			Endpoint:        cfg.R2Endpoint,
+		})
+		if err != nil {
+			return err
+		}
+		docs = r2
+		log.Info("object storage ready", "bucket", cfg.R2BucketName)
+	} else if cfg.Env == "production" {
+		// Production with no bucket: docs stays nil, so every upload endpoint
+		// answers 503 and says so, and the development upload route below is not
+		// registered at all.
+		//
+		// The stub must never stand in here. It keeps documents in memory, so a
+		// customer would be told their identity was submitted, an operator would
+		// see a submission with no document behind it, and a restart would erase
+		// the lot. Refusing is the only honest answer, and it is the same
+		// fail-closed rule Withdraw follows when it has no payout dispatcher.
+		log.Error("object storage is not configured: identity verification will refuse uploads. " +
+			"Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME")
+	} else {
+		stub := storage.NewStub()
+		// Point the stub's presigned URLs at this API's own development upload
+		// route, so a browser can complete the real three-step flow with no bucket.
+		stub.BaseURL = strings.TrimSuffix(cfg.PublicAPIURL, "/") + storage.StubUploadPath
+		docs = stub
+		documentStub = stub
+		log.Warn("object storage not configured: KYC documents use an in-memory stub and do not persist",
+			"upload_route", stub.BaseURL)
+	}
+	kyc := service.NewKYCService(store, docs, cfg, log)
+	// The console asks the KYC service for a document URL rather than reaching into
+	// the object store itself, so one place decides how documents are exposed.
+	admin.SetDocuments(kyc)
+
 	settings := service.NewSettingsService(store, service.SettingsDefaults{
 		DigitContractsEnabled: cfg.DigitContractsEnabled,
 		BotEnabled:            cfg.BotEnabled,
@@ -159,6 +214,12 @@ func run() error {
 	// settlement handler: a pass that settled with nowhere to send the result
 	// would consume the guard and leave the ledger pending for ever.
 	payouts.Start(ctx)
+
+	// Two jobs on one ticker: abandoned uploads always, reviewed documents only
+	// once a retention period has been set. See section 1 of
+	// docs/kyc-r2-upload-plan.md -- that period is a compliance decision, and zero
+	// (the default) means never delete.
+	service.NewKYCRetentionService(kyc).Start(ctx)
 	// After digits.Start, whose boot sweep has already settled or voided what it
 	// could: runs left live by the previous process are ended here rather than
 	// resumed, and a contract still open folds into its (now stopped) run through
@@ -173,7 +234,8 @@ func run() error {
 	go observability.Collect(ctx, observability.NewStoreSampler(store, hub.ClientCount, cfg.MpesaReconcileMinAge), log, time.Minute)
 
 	// --- HTTP ---------------------------------------------------------------
-	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts}
+	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts,
+		DocumentStub: documentStub}
 	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
@@ -183,6 +245,7 @@ func run() error {
 	deps.Handler.Market = handlers.NewMarketHandler(store, feed, signals)
 	deps.Handler.WS = handlers.NewWSHandler(hub, feed, wallet, cfg.CORSOrigins, log)
 	deps.Handler.Admin = handlers.NewAdminHandler(admin, cfg)
+	deps.Handler.KYC = handlers.NewKYCHandler(kyc)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
