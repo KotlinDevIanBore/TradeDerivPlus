@@ -83,9 +83,11 @@ test.describe('Automated trading', () => {
     // still has to settle.
     await expect(page.getByText(/Worst case you lose/)).toBeVisible()
 
-    // Matches is the expensive one and says so.
+    // Matches is the expensive one and says so. -4.50% is the same price as
+    // Over 8 / Under 1 — one digit in ten — since every selection is priced by
+    // one rule (digit_payout.go houseRatio). It used to be a hand-picked -10.00%.
     await page.getByRole('tab', { name: 'Matches/Differs' }).click()
-    await expect(page.getByText(/Expected return -10\.00% per contract/)).toBeVisible()
+    await expect(page.getByText(/Expected return -4\.50% per contract/)).toBeVisible()
     await expect(page.getByText('This contract costs the most per play.')).toBeVisible()
 
     await page.getByRole('tab', { name: 'Even/Odd' }).click()
