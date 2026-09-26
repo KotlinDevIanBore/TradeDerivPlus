@@ -3,7 +3,18 @@
 @tailwind utilities;
 
 @layer base {
-  :root { color-scheme: dark; }
+  :root {
+    color-scheme: dark;
+    /* The bottom tab bar's REAL height: its 64px plus whatever the phone's
+       system UI claims at the bottom edge (the home indicator on a notched
+       iPhone, ~34px). Nothing here read the safe-area insets before, so the
+       tab bar sat under the gesture zone. Anything that stacks against the tab
+       bar -- the trade action bar, the main content's bottom padding -- must
+       use this rather than the bare token, or it lands under the system UI on
+       exactly the phones the token was too short for. viewport-fit=cover in
+       index.html is what makes env() non-zero. */
+    --tabbar-h: calc(theme('spacing.tabbar') + env(safe-area-inset-bottom, 0px));
+  }
   html, body, #root { height: 100%; }
   body {
     @apply bg-bg text-text font-sans antialiased;

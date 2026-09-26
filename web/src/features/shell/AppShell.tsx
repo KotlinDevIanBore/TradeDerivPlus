@@ -82,11 +82,14 @@ export function AppShell() {
   usePriceFeed()
   useSignalFeed()
 
-  // A new signal raises a toast wherever the user is.
+  // A new signal raises a toast wherever the user is. Repeats fold into one row
+  // ("3 new signals") rather than stacking: with a signal every two minutes and
+  // a toast per contract, three rows was the normal state on the trading screen.
   useSignalStream((signal) => {
     toast.info(
       `New ${signal.direction.toUpperCase()} signal on ${signal.symbol_code}`,
       `${Number(signal.confidence).toFixed(0)}% confidence`,
+      { collapse: { key: 'signal', title: (n) => `${n} new signals` } },
     )
   })
 
@@ -212,7 +215,10 @@ export function AppShell() {
             used to apply to everything else went with the screens that needed
             it: a chart inside one is a widget, and a panel beside it made that
             worse. */}
-        <main className="min-w-0 flex-1 pb-[calc(theme(spacing.tabbar)+16px)] lg:pb-8">
+        {/* Exactly the tab bar's height, no extra 16px: the trading surfaces end
+            in a sticky action bar, and any padding past the tab bar is a strip of
+            empty background between the two once the page is scrolled to the end. */}
+        <main className="min-w-0 flex-1 pb-[var(--tabbar-h)] lg:pb-8">
           <Outlet />
         </main>
       </div>

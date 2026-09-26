@@ -23,7 +23,10 @@ export function TabBar() {
     <nav
       aria-label="Bottom"
       className={cn(
-        'fixed inset-x-0 bottom-0 z-30 h-tabbar border-t border-hairline',
+        // Height is the token plus the safe-area inset, so the icons sit above
+        // a phone's home indicator rather than under it. The <ul> keeps the 64px
+        // (h-full resolves against the content box, which excludes the padding).
+        'fixed inset-x-0 bottom-0 z-30 h-[var(--tabbar-h)] pb-[env(safe-area-inset-bottom)] border-t border-hairline',
         'bg-bg/90 backdrop-blur-lg lg:hidden',
       )}
     >

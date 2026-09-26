@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/Input'
 import { humanMessage } from '@/components/ErrorState'
 import { DigitPicker } from './DigitPicker'
 import { useDigitQuote } from '@/hooks/useQueries'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/cn'
 import { money } from '@/lib/format'
 import { dec } from '@/lib/money'
@@ -35,6 +36,7 @@ export function DigitTicket({
   error,
   onSubmit,
   flushTop = false,
+  actionsTarget = null,
 }: {
   contractType: DigitContractType
   symbol: TradeSymbol | null
@@ -50,6 +52,10 @@ export function DigitTicket({
    * and two rounded edges would stack.
    */
   flushTop?: boolean
+  /** Where to render the two outcome buttons instead of inline. On a phone the
+   *  screen passes its pinned action bar so the buttons stay reachable while
+   *  the rest of the ticket scrolls with the page; null keeps them in place. */
+  actionsTarget?: HTMLElement | null
 }) {
   const [stake, setStake] = useState('10')
   const [digit, setDigit] = useState(0)
@@ -95,6 +101,27 @@ export function DigitTicket({
       side,
     })
   }
+
+  const actions = (
+    <div className="grid grid-cols-2 gap-2">
+      <OutcomeButton
+        label={primaryLabel(contractType)}
+        quote={primaryQuote.data}
+        variant="primary"
+        disabled={!canSubmit}
+        loading={submitting}
+        onClick={() => fire('primary')}
+      />
+      <OutcomeButton
+        label={secondaryLabel(contractType)}
+        quote={secondaryQuote.data}
+        variant="secondary"
+        disabled={!canSubmit}
+        loading={submitting}
+        onClick={() => fire('secondary')}
+      />
+    </div>
+  )
 
   return (
     <div
@@ -157,24 +184,7 @@ export function DigitTicket({
       ) : null}
       {disabledReason ? <p className="mt-2 text-meta text-warning">{disabledReason}</p> : null}
 
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <OutcomeButton
-          label={primaryLabel(contractType)}
-          quote={primaryQuote.data}
-          variant="primary"
-          disabled={!canSubmit}
-          loading={submitting}
-          onClick={() => fire('primary')}
-        />
-        <OutcomeButton
-          label={secondaryLabel(contractType)}
-          quote={secondaryQuote.data}
-          variant="secondary"
-          disabled={!canSubmit}
-          loading={submitting}
-          onClick={() => fire('secondary')}
-        />
-      </div>
+      {actionsTarget ? createPortal(actions, actionsTarget) : <div className="mt-4">{actions}</div>}
     </div>
   )
 }
