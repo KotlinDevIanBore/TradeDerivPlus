@@ -245,6 +245,11 @@ export function AppShell() {
         onOpenChange={onDismiss}
         account={account}
         wallet={wallet.data}
+        realAccount={realAccount}
+        onSwitchToReal={() => {
+          if (realAccount) setActiveAccount(realAccount.id)
+          overlay.close()
+        }}
       />
     </div>
   )

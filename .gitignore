@@ -28,3 +28,6 @@ deploy/prometheus/metrics_token
 deploy/prometheus/metrics_token
 .claude/
 web/test-results/
+
+# Alertmanager: the real Slack webhook URL, like deploy/prometheus/metrics_token
+deploy/alertmanager/slack_webhook_url

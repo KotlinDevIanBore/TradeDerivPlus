@@ -5,7 +5,29 @@ global:
 rule_files:
   - /etc/prometheus/rules.yml
 
+# Without this block the rules above evaluated and went nowhere. See
+# docs/investigation-money-mechanics.md finding 2.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
+  # The Railway deployment -- the only target whose numbers are real money. Listed
+  # FIRST because it is the one that matters; the localhost job below is for
+  # development. Prometheus skips a job whose credentials file is absent, so this
+  # stays harmless on a machine that has not created deploy/prometheus/metrics_token.
+  - job_name: tradederivplus-api-production
+    metrics_path: /metrics
+    scheme: https
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics_token
+    static_configs:
+      - targets: ["tradederivplus-production.up.railway.app"]
+        labels:
+          env: production
+
   - job_name: tradederivplus-api
     metrics_path: /metrics
     # The API requires a bearer token; a public metrics endpoint would leak

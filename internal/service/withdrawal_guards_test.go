@@ -432,3 +432,98 @@ func TestTodayTotalsCountsPendingWithdrawals(t *testing.T) {
 	}
 	h.assertReconciled(accountID)
 }
+
+// The floor, and the rounding it exists to make immaterial.
+//
+// Both halves of finding 4 in one test, because they are one bug: without a
+// minimum, a request could be small enough that the debit rounded to nothing
+// while Daraja — which takes whole shillings only — was still sent one. The
+// amounts here are in cents rather than whole dollars, so the helper above is
+// not used.
+func TestWithdrawalFloor(t *testing.T) {
+	h := newHarness(t)
+	h.cfg.MinWithdrawKES = 50 // $0.386 at the harness rate of 129.50
+	userID, accountID := h.verifiedWithBalance(500)
+
+	withdrawUSD := func(usd string) (*models.Transaction, error) {
+		h.t.Helper()
+		return h.wallet.Withdraw(h.ctx, service.WithdrawInput{
+			UserID: userID, AccountID: accountID,
+			AmountUSD: decimal.RequireFromString(usd), PhoneNumber: "0712345678",
+		})
+	}
+
+	var ve *service.ValidationError
+
+	// The case that motivated the floor: rounds to nothing, but a whole shilling
+	// would still have been sent.
+	if _, err := withdrawUSD("0.001"); !errors.As(err, &ve) || ve.Field != "amount" {
+		t.Fatalf("withdrawing $0.001 returned %v, want a validation error on amount", err)
+	}
+
+	// Just under the floor: 49.99 KES.
+	if _, err := withdrawUSD("0.38"); !errors.As(err, &ve) || ve.Field != "amount" {
+		t.Fatalf("withdrawing $0.38 (KES 49.21) returned %v, want a validation error on amount", err)
+	}
+
+	if n := h.countWithdrawals(accountID); n != 0 {
+		t.Fatalf("refused withdrawals wrote %d rows", n)
+	}
+
+	// At the floor exactly, allowed. $0.39 is KES 50.51, the smallest two-decimal
+	// amount that clears 50.
+	tx, err := withdrawUSD("0.39")
+	if err != nil {
+		t.Fatalf("withdrawing $0.39 (KES 50.51), which clears the KES 50 floor: %v", err)
+	}
+	if tx == nil {
+		t.Fatal("withdrawal at the floor returned no transaction")
+	}
+	h.assertReconciled(accountID)
+}
+
+// The debit and the payout must be computed from the same rounded figure.
+//
+// Before this, the debit was rounded to cents by the NUMERIC(18,2) column while
+// the KES amount was derived from the unrounded request and then rounded UP for
+// Daraja, so the two disagreed and the difference left the business. This asserts
+// the agreement directly rather than asserting the old numbers are gone.
+func TestWithdrawalDebitAndPayoutAgreeOnTheAmount(t *testing.T) {
+	h := newHarness(t)
+	userID, accountID := h.verifiedWithBalance(500)
+
+	// $10.004 rounds to $10.00, which is exactly KES 1295.00 at the harness rate
+	// -- so Ceil leaves it alone and the payout is 1295, not the 1296 that the
+	// unrounded 1295.518 would have produced.
+	tx, err := h.wallet.Withdraw(h.ctx, service.WithdrawInput{
+		UserID: userID, AccountID: accountID,
+		AmountUSD: decimal.RequireFromString("10.004"), PhoneNumber: "0712345678",
+	})
+	if err != nil {
+		t.Fatalf("withdraw: %v", err)
+	}
+
+	if got := tx.Amount.String(); got != "-10" {
+		t.Fatalf("ledger debit is %s, want -10 (the request rounded to cents)", got)
+	}
+
+	payout, err := h.store.Payouts.GetByTransactionID(h.ctx, tx.ID)
+	if err != nil {
+		t.Fatalf("payout row: %v", err)
+	}
+	// The payout is what Daraja is asked to send. It must equal the KES value of
+	// the amount actually debited.
+	wantKES := decimal.RequireFromString("1295")
+	if !payout.Amount.Equal(wantKES) {
+		t.Fatalf("payout is KES %s, want KES %s -- the customer is sent a different amount than was debited",
+			payout.Amount.String(), wantKES.String())
+	}
+
+	// And the two agree in the direction that matters: the business never sends
+	// more than it took.
+	debitedKES := tx.Amount.Abs().Mul(decimal.RequireFromString("129.50"))
+	if payout.Amount.GreaterThan(debitedKES) {
+		t.Fatalf("payout KES %s exceeds the KES %s debited", payout.Amount, debitedKES)
+	}
+	h.assertReconciled(accountID)
+}

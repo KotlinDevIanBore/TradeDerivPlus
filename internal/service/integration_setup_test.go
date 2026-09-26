@@ -150,6 +150,10 @@ func newHarness(t *testing.T) *harness {
 		// a test that wants a different ceiling sets it itself.
 		MaxWithdrawKES:    150000,
 		MaxWithdrawDayKES: 300000,
+		// Set for the same reason as everything else in this block: left at zero
+		// the floor is absent, and every test asserting a small withdrawal is
+		// refused would pass whether the guard existed or not.
+		MinWithdrawKES: 50,
 
 		// The payout pass's schedule. Omitting these left GiveUp at zero, which
 		// made every payout instantly past the horizon — and the give-up test
