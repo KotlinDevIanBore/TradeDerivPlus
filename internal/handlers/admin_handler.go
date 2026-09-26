@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -135,6 +136,28 @@ func (h *AdminHandler) Dashboard(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, d)
+}
+
+// Finance is the house-edge and volume report. Read-only, like Dashboard.
+//
+// The range is an enum rather than free from/to, because every value it accepts
+// is one the new settled_at index serves and none of them can ask for a decade.
+// FinanceRange returns a ValidationError for anything else, which fail() turns
+// into a 400 naming the field.
+//
+// GET /admin/finance?range=24h|7d|30d|all   (default 7d)
+func (h *AdminHandler) Finance(c *gin.Context) {
+	from, to, err := service.FinanceRange(c.DefaultQuery("range", "7d"), time.Now())
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	report, err := h.admin.Finance(c.Request.Context(), from, to)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, report)
 }
 
 func (h *AdminHandler) Users(c *gin.Context) {
