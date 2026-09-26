@@ -4,6 +4,7 @@ import { humanMessage } from '@/components/ErrorState'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Skeleton } from '@/components/ui/Skeleton'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/cn'
 import { money, percent } from '@/lib/format'
 import { dec } from '@/lib/money'
@@ -85,6 +86,7 @@ export function BotTicket({
   onConfigChange,
   onSubmit,
   flushTop = false,
+  actionsTarget = null,
 }: {
   contractType: DigitContractType
   symbol: TradeSymbol | null
@@ -103,6 +105,8 @@ export function BotTicket({
   onConfigChange?: (config: BotTicketConfig) => void
   onSubmit: (values: BotTicketSubmit) => void
   flushTop?: boolean
+  /** See DigitTicket: the pinned action bar on a phone, null on a desktop. */
+  actionsTarget?: HTMLElement | null
 }) {
   const [side, setSide] = useState<'primary' | 'secondary'>('primary')
   const [digit, setDigit] = useState(0)
@@ -190,17 +194,22 @@ export function BotTicket({
     onSubmit({ contractType, selection, stake, intervalMS, limits })
   }
 
+  const startButton = (
+    <Button block size="lg" disabled={!canSubmit} loading={submitting} onClick={start}>
+      Start auto run
+    </Button>
+  )
+
   return (
     <div
       className={cn(
         'bg-surface p-4 lg:rounded-card lg:border lg:border-border',
         flushTop ? 'pt-2' : 'rounded-t-3xl border-t border-border',
-        // On a phone this is a sticky sheet over the chart, and it is a form
-        // rather than the two buttons the manual ticket has — tall enough, with
-        // every field expanded, to cover the contract-type tabs and the digit row
-        // completely. Capping it keeps what it sits over reachable; on a desktop
-        // it is a column in its own right and needs no cap.
-        'max-h-[58vh] overflow-y-auto lg:max-h-none lg:overflow-visible',
+        // No height cap and no inner scroll. Both existed because this used to
+        // be a sticky sheet over the chart, tall enough at 524px to cover the
+        // tabs and the digit row. It sits in the page's flow now, so the page
+        // scrolls it; a scroll region inside a scrolling page is a trap on a
+        // phone. Only the Start button is pinned, via actionsTarget.
       )}
     >
       <SideChoice contractType={contractType} value={side} onChange={setSide} />
@@ -348,16 +357,7 @@ export function BotTicket({
       ) : null}
       {disabledReason ? <p className="mt-2 text-meta text-warning">{disabledReason}</p> : null}
 
-      <Button
-        block
-        size="lg"
-        className="mt-4"
-        disabled={!canSubmit}
-        loading={submitting}
-        onClick={start}
-      >
-        Start auto run
-      </Button>
+      {actionsTarget ? createPortal(startButton, actionsTarget) : <div className="mt-4">{startButton}</div>}
 
       <p className="mt-2 text-center text-nano text-faint">
         Places your settings for you until a stop condition is met.

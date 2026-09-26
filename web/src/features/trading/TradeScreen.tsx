@@ -34,6 +34,7 @@ import { ChartRangeToggle } from './ChartRangeToggle'
 import { windowChange, type ChartRange, type WindowChange } from './chartRange'
 import { ChartSkeleton } from './ChartSkeleton'
 import { PriceChartLazy } from './PriceChartLazy'
+import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { OrderTicket, type TicketValues } from './OrderTicket'
 import { SessionStrip } from './SessionStrip'
 import { sessionStats } from './sessionStats'
@@ -60,6 +61,11 @@ export function TradeScreen() {
 
   const [range, setRange] = useState<ChartRange>(5)
   const [ticket, setTicket] = useState<TicketValues | null>(null)
+  // The pinned action bar on a phone; see DigitTradeScreen.
+  const desktop = useIsDesktop()
+  const [actionBar, setActionBar] = useState<HTMLDivElement | null>(null)
+  const actionsTarget = desktop ? null : actionBar
+
   const [pendingConfirm, setPendingConfirm] = useState<TicketValues | null>(null)
   const [waitedForPrice, setWaitedForPrice] = useState(false)
 
@@ -300,8 +306,9 @@ export function TradeScreen() {
         ) : null}
       </div>
 
-      {/* Sticky at the bottom on mobile, a right column on desktop. */}
-      <div className="sticky bottom-tabbar z-20 mt-4 lg:static lg:mt-0">
+      {/* In flow on a phone, a right column on a desktop. It was sticky, and
+          the same 0px-of-chart problem the digit surface had applied here. */}
+      <div className="mt-4 lg:mt-0">
         <OrderTicket
           symbol={symbol}
           currentPrice={tick?.price}
@@ -323,8 +330,15 @@ export function TradeScreen() {
           initial={prefill}
           expiredSignal={expiredSignal}
           isDemo={isDemo}
+          actionsTarget={actionsTarget}
         />
       </div>
+
+      {/* The pinned action bar; see DigitTradeScreen for the reasoning. */}
+      <div
+        ref={setActionBar}
+        className="sticky bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface px-gutter py-3 empty:hidden lg:hidden"
+      />
 
       <Sheet
         open={pendingConfirm !== null}

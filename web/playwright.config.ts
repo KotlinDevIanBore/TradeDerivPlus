@@ -39,11 +39,29 @@ export default defineConfig({
    * when their surface is off, which is what makes the mistake legible instead
    * of merely slow. See requireFeatures in e2e/helpers.ts.
    *
-   *   npx playwright test --project=mobile --project=desktop        → CFD
-   *   npx playwright test --project=digit-mobile --project=digit-desktop
+   *   npx playwright test --project=mobile --project=mobile-narrow --project=desktop        → CFD
+   *   npx playwright test --project=digit-mobile --project=digit-narrow --project=digit-desktop
+   *
+   * Two phone widths, not one. Pixel 7 is 412px wide, and every mobile layout
+   * defect in docs/investigation-reports/mobile-trading-screen-layout.md was
+   * invisible at exactly that width: the contract-type tab row overflows by 28px
+   * at 375 and fits by 9px at 412; the digit picker wraps to two rows at 375 and
+   * fits at 412; the chart keeps 237px at 412x915 and 0px at 375x667. A suite
+   * that only ever looked at 412 could not have failed on any of them.
+   *
+   * The narrow projects use the iPhone 13 Mini descriptor (375 wide, the width
+   * of every iPhone from the SE to the 13 mini) at the iPhone SE's 667px height,
+   * so one project covers both the narrowest common width and the shortest
+   * common height. Chromium rather than the descriptor's WebKit, because CI
+   * installs chromium only -- the point is the viewport, not the engine.
    */
   projects: [
     { name: 'mobile', use: { ...devices['Pixel 7'] }, testMatch: /user\..*\.spec\.ts/ },
+    {
+      name: 'mobile-narrow',
+      use: { ...devices['iPhone 13 Mini'], browserName: 'chromium', viewport: { width: 375, height: 667 } },
+      testMatch: /user\..*\.spec\.ts/,
+    },
     {
       name: 'desktop',
       use: { ...devices['Desktop Chrome'] },
@@ -52,6 +70,11 @@ export default defineConfig({
     {
       name: 'digit-mobile',
       use: { ...devices['Pixel 7'] },
+      testMatch: /digit\..*\.spec\.ts/,
+    },
+    {
+      name: 'digit-narrow',
+      use: { ...devices['iPhone 13 Mini'], browserName: 'chromium', viewport: { width: 375, height: 667 } },
       testMatch: /digit\..*\.spec\.ts/,
     },
     {

@@ -4,6 +4,7 @@ import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { humanMessage } from '@/components/ErrorState'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/cn'
 import { money, price as fmtPrice, signedMoney } from '@/lib/format'
 import { dec } from '@/lib/money'
@@ -37,6 +38,7 @@ export function OrderTicket({
   initial,
   expiredSignal,
   isDemo,
+  actionsTarget = null,
 }: {
   symbol: TradeSymbol | null
   currentPrice: string | undefined
@@ -51,6 +53,8 @@ export function OrderTicket({
   /** Set when arriving from a signal that has aged out. */
   expiredSignal?: boolean
   isDemo: boolean
+  /** See DigitTicket: the pinned action bar on a phone, null on a desktop. */
+  actionsTarget?: HTMLElement | null
 }) {
   const [direction, setDirection] = useState<Direction>(initial?.direction ?? 'buy')
   const [stake, setStake] = useState(initial?.stake ?? '10')
@@ -146,6 +150,19 @@ export function OrderTicket({
 
   const canSubmit =
     !disabled && !stakeError && !slError && !tpError && stake !== '' && stakeValue.greaterThan(0)
+
+  const submitButton = (
+    <Button
+      size="lg"
+      block
+      variant={direction === 'buy' ? 'buy' : 'sell'}
+      disabled={!canSubmit}
+      loading={submitting}
+      onClick={() => onSubmit(values)}
+    >
+      {direction === 'buy' ? 'Buy' : 'Sell'} {symbol?.code ?? ''} for {money(stake || '0')}
+    </Button>
+  )
 
   return (
     <div className="rounded-t-3xl border-t border-border bg-surface p-4 lg:rounded-card lg:border">
@@ -259,17 +276,7 @@ export function OrderTicket({
         <p className="mt-2 text-meta text-warning">{disabledReason}</p>
       ) : null}
 
-      <Button
-        size="lg"
-        block
-        className="mt-3"
-        variant={direction === 'buy' ? 'buy' : 'sell'}
-        disabled={!canSubmit}
-        loading={submitting}
-        onClick={() => onSubmit(values)}
-      >
-        {direction === 'buy' ? 'Buy' : 'Sell'} {symbol?.code ?? ''} for {money(stake || '0')}
-      </Button>
+      {actionsTarget ? createPortal(submitButton, actionsTarget) : <div className="mt-3">{submitButton}</div>}
     </div>
   )
 }

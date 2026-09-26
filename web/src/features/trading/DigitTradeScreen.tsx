@@ -34,6 +34,7 @@ import { BotRunCard } from './BotRunCard'
 import { BotTicket, type BotTicketConfig, type BotTicketSubmit } from './BotTicket'
 import { DigitTicket, type DigitTicketSubmit } from './DigitTicket'
 import { PriceChartLazy } from './PriceChartLazy'
+import { useIsDesktop } from '@/hooks/useIsDesktop'
 import { SessionStrip } from './SessionStrip'
 import { digitSessionStats } from './sessionStats'
 import { SymbolPicker } from './SymbolPicker'
@@ -62,6 +63,14 @@ export function DigitTradeScreen() {
 
   const [range, setRange] = useState<ChartRange>(5)
   const [contractType, setContractType] = useState<DigitContractType>('even_odd')
+  // On a phone the ticket sits in the page's flow and only its action buttons
+  // are pinned, portaled into the bar rendered at the end of this screen. On a
+  // desktop the ticket is a card in its own column and keeps its buttons: no
+  // target, no portal. See docs/investigation-reports/mobile-trading-screen-layout.md §2.
+  const desktop = useIsDesktop()
+  const [actionBar, setActionBar] = useState<HTMLDivElement | null>(null)
+  const actionsTarget = desktop ? null : actionBar
+
   const [ticketKey, setTicketKey] = useState(0)
   const [waitedForPrice, setWaitedForPrice] = useState(false)
 
@@ -183,9 +192,12 @@ export function DigitTradeScreen() {
       {
         onSuccess: (contract) => {
           setTicketKey((k) => k + 1)
+          // Brief: the settlement toast follows one tick later and says what
+          // actually happened, so this one only needs to confirm the tap landed.
           toast.success(
             `${labelSelection(contract.contract_type, contract.selection)} opened`,
             `Pays ${money(contract.potential_payout)} if it wins`,
+            { duration: 2500 },
           )
         },
       },
@@ -274,7 +286,11 @@ export function DigitTradeScreen() {
         </div>
       </div>
 
-      <div className="sticky bottom-tabbar z-20 mt-4 lg:static lg:mt-0">
+      {/* In flow, not sticky. It was `sticky bottom-tabbar`: a 295-524px panel
+          pinned above the tab bar, painting over a chart that is a fixed 240px,
+          which left 0px of price line on a 375x667 phone with Over/Under
+          selected. The page scrolls now; the buttons alone are pinned below. */}
+      <div className="mt-4 lg:mt-0">
         {botEnabled ? (
           <div className="rounded-t-3xl border-t border-border bg-surface px-4 pt-4 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0 lg:pt-0">
             <p className="mb-1.5 hidden text-nano font-semibold uppercase tracking-wide text-faint lg:block">
@@ -317,6 +333,7 @@ export function DigitTradeScreen() {
             onConfigChange={onBotConfigChange}
             onSubmit={startBotRun}
             flushTop={botEnabled}
+            actionsTarget={actionsTarget}
           />
         ) : (
           <DigitTicket
@@ -336,9 +353,20 @@ export function DigitTradeScreen() {
             submitting={openDigit.isPending}
             error={error}
             onSubmit={submit}
+            actionsTarget={actionsTarget}
           />
         )}
       </div>
+
+      {/* The pinned action bar. Sticky against the tab bar's real height
+          (safe-area included), last in the flow so it sticks whenever the page
+          extends past the fold and settles into place at the bottom. Hidden
+          when nothing is portaled into it -- a live run's card has no button
+          to pin -- and never on a desktop, where the column holds everything. */}
+      <div
+        ref={setActionBar}
+        className="sticky bottom-[var(--tabbar-h)] z-20 border-t border-border bg-surface px-gutter py-3 empty:hidden lg:hidden"
+      />
     </div>
   )
 }
