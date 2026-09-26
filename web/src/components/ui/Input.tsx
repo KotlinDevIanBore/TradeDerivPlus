@@ -43,7 +43,14 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
           className={cn(
-            'h-11 w-full bg-transparent text-body text-text outline-none',
+            // 16px, deliberately, and not the 14px body size the rest of the form
+            // uses. This input rendered at 16px for months by accident -- a
+            // tailwind-merge bug dropped text-body -- and that accident was doing a
+            // job: iOS Safari zooms the whole page when a field under 16px takes
+            // focus. Fixing the merge (lib/cn.ts) would have shrunk every input in
+            // the app to 14px and switched that zoom on. text-card is the 16px
+            // token, so the size is now stated rather than fallen back into.
+            'h-11 w-full bg-transparent text-card text-text outline-none',
             'placeholder:text-faint',
             className,
           )}
