@@ -238,7 +238,7 @@ delegates to it. Semantics: **win credit = stake × (1 + ratio)**; a loss forfei
 
 | Type | Identifier | Required params | Ratio source |
 |---|---|---|---|
-| Matches / Differs | `matches_differs` | `mode` ∈ match\|differ, `digit` 0–9 | static: `8.0000` / `0.1000` (`:18-19`) |
+| Matches / Differs | `matches_differs` | `mode` ∈ match\|differ, `digit` 0–9 | `houseRatio(1)` / `houseRatio(9)` → `8.5500` / `0.1056` |
 | Even / Odd | `even_odd` | `parity` ∈ even\|odd | static: `0.9520` (`:17`) |
 | Over / Under | `over_under` | `side` ∈ over\|under, `barrier` 0–9 | **computed** (`:49-62`) |
 
@@ -254,7 +254,7 @@ Expected value per unit staked is `p × (1 + ratio) − 1`. Computed from `Payou
 | Contract | Win prob | Ratio | Edge (per trade) |
 |---|---:|---:|---:|
 | **Over 0 / Under 9** | 0.9 | 0.1056 | **−0.50%** ← least bad |
-| Differs (any digit) | 0.9 | 0.1000 | −1.00% |
+| Differs (any digit) | 0.9 | 0.1056 | **−0.50%** |
 | Over 1 / Under 8 | 0.8 | 0.2375 | −1.00% |
 | Over 2 / Under 7 | 0.7 | 0.4071 | −1.50% |
 | Over 3 / Under 6 | 0.6 | 0.6333 | −2.00% |
@@ -264,7 +264,7 @@ Expected value per unit staked is `p × (1 + ratio) − 1`. Computed from `Payou
 | Over 6 / Under 3 | 0.3 | 2.2167 | −3.50% |
 | Over 7 / Under 2 | 0.2 | 3.8000 | −4.00% |
 | Over 8 / Under 1 | 0.1 | 8.5500 | −4.50% |
-| **Matches (any digit)** | 0.1 | 8.0000 | **−10.00%** ← worst |
+| **Matches (any digit)** | 0.1 | 8.5500 | **−4.50%** ← joint worst |
 
 **The code comment at `digit_payout.go:55` says "house edge ~5%". That is not what the formula
 produces.** The 0.95 factor is applied to the *profit*, not the payout, so the realised edge is
@@ -272,7 +272,12 @@ produces.** The 0.95 factor is applied to the *profit*, not the payout, so the r
 worth knowing before a bot is pointed at a barrier.
 
 Practical consequence: **the contract a bot selects matters more than any strategy it runs.** A bot
-looping Matches burns twenty times more capital per trade than one looping Over 0.
+looping the worst band burns nine times more capital per trade than one looping Over 0.
+
+**Updated 26 September 2026.** Matches and Differs were hand-picked round numbers (8.0000 and
+0.1000) while Over/Under was computed, so identical bets were priced differently — Matches cost
+2.2× Over 8, and Differs 2× Under 9, for the same odds. All three families now use one rule, so
+Matches reads −4.50% (was −10.00%) and Differs −0.50% (was −1.00%). See `payout-table-status.md`.
 
 ---
 
@@ -575,7 +580,7 @@ UI, and `digit-contracts-investigation.md` §177 for the global-vs-per-user deci
 - **Every contract has negative EV** (§3.1). What is the bot's honest value proposition, and how is
   that communicated in the UI without implying profit?
 - **Which contract types may a bot use?** Restricting it to the −0.50% band (Over 0 / Under 9) versus
-  allowing Matches at −10% is a twenty-fold difference in burn rate.
+  allowing the worst band at −4.50% is a nine-fold difference in burn rate.
 - **Demo only, or real money?** Demo-first would de-risk everything in §8.2.
 - **Global or per-account?** `digit-contracts-investigation.md:177` already argues global with an
   allowlist.
@@ -587,7 +592,7 @@ UI, and `digit-contracts-investigation.md` §177 for the global-vs-per-user deci
 Five things the planning session must account for.
 
 **1. Decide the economics question before the architecture.** Every contract type has negative
-expected value, from −0.50% to −10.00% per trade, and the payout table is explicitly marked not
+expected value, from −0.50% to −4.50% per trade, and the payout table is explicitly marked not
 final. A bot cannot be sold as a way to make money on these numbers. Planning should settle what it
 *is* for — consistency, speed, hands-off session limits — and whether it ships demo-only until
 product replaces the table. This is a product decision that changes the UI copy, the risk controls,

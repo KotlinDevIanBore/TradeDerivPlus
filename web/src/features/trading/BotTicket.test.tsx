@@ -33,7 +33,7 @@ const evenOddQuote: DigitQuote = {
   expected_return: '-0.024',
 }
 
-/** Matches, the worst selection on the table at −10%. */
+/** Matches — joint worst on the table at −4.5%, alongside Over 8 and Under 1. */
 const matchesQuote: DigitQuote = {
   contract_type: 'matches_differs',
   selection: { mode: 'match', digit: 3 },
@@ -41,7 +41,7 @@ const matchesQuote: DigitQuote = {
   payout_ratio: '8',
   potential_payout: '90.00',
   win_probability: '0.1',
-  expected_return: '-0.1',
+  expected_return: '-0.045',
 }
 
 function renderTicket(overrides: Partial<React.ComponentProps<typeof BotTicket>> = {}) {
@@ -80,7 +80,7 @@ describe('BotTicket', () => {
 
     it('warns on the contract that costs the most', () => {
       renderTicket({ contractType: 'matches_differs', quote: matchesQuote })
-      expect(screen.getByText(/Expected return -10\.00% per contract/)).toBeInTheDocument()
+      expect(screen.getByText(/Expected return -4\.50% per contract/)).toBeInTheDocument()
       expect(screen.getByText('This contract costs the most per play.')).toBeInTheDocument()
     })
 
