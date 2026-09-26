@@ -7,32 +7,15 @@ import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { toast } from '@/components/ui/Toast'
 import { cn } from '@/lib/cn'
-import { money, relativeTime } from '@/lib/format'
+import { Tile } from '../components/Tile'
+import { edgeNoisePP, edgePercent } from './Finance'
+import { money, relativeTime, signedMoney } from '@/lib/format'
 import { adminApi, adminKeys } from '../adminApi'
 import { AdminPageHeader } from '../AdminShell'
 import { ActionBadge } from '../components/badges'
 import { ReasonDialog } from '../components/ReasonDialog'
 import type { AccountDrift, HourlyDeposits } from '../adminTypes'
 
-function Tile({
-  label,
-  value,
-  sub,
-  className,
-}: {
-  label: string
-  value: React.ReactNode
-  sub?: string
-  className?: string
-}) {
-  return (
-    <div className={cn('rounded-card border border-border bg-surface px-4 py-3', className)}>
-      <p className="text-meta text-muted">{label}</p>
-      <p className="mt-1 text-title font-bold tnum">{value}</p>
-      {sub ? <p className="mt-0.5 text-meta text-faint tnum">{sub}</p> : null}
-    </div>
-  )
-}
 
 /**
  * The reconciliation tile. Zero is the healthy state and reads quietly; any
@@ -254,7 +237,7 @@ export function AdminDashboard() {
         <ReconciliationTile count={d!.drifted_accounts} drift={d!.drift} />
       )}
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-6">
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {dash.isLoading
           ? Array.from({ length: 6 }).map((_, i) => (
               <Skeleton key={i} className="h-[76px] rounded-card" />
@@ -294,6 +277,36 @@ export function AdminDashboard() {
                     ? 'placing contracts now'
                     : undefined,
               },
+              // The two finance tiles. Absent rather than zero when the
+              // aggregate failed, so an empty dashboard never reads as "the
+              // house made nothing". Labelled 24h, not "today", because that is
+              // the window they actually cover and the screen they link to.
+              ...(d?.finance
+                ? [
+                    {
+                      label: 'House P&L · 24h',
+                      value: (
+                        <Link to="/admin/finance?range=24h" className="text-accent hover:underline">
+                          {signedMoney(d.finance.house_pnl_24h)}
+                        </Link>
+                      ),
+                      sub: `${money(d.finance.stakes_24h)} staked, real money`,
+                    },
+                    {
+                      label: 'Edge · 24h',
+                      value: (
+                        <Link to="/admin/finance?range=24h" className="text-accent hover:underline">
+                          {d.finance.edge.too_few_to_read
+                            ? '—'
+                            : edgePercent(d.finance.edge.realised)}
+                        </Link>
+                      ),
+                      sub: d.finance.edge.too_few_to_read
+                        ? `${d.finance.edge.sample_size} of ${d.finance.edge.min_sample} contracts`
+                        : `${edgeNoisePP(d.finance.edge.sample_size)} at n=${d.finance.edge.sample_size}`,
+                    },
+                  ]
+                : []),
             ].map((t) => <Tile key={t.label} {...t} />)}
       </div>
 

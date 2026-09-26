@@ -28,6 +28,10 @@ type Dashboard struct {
 	DriftedAccounts     int                         `json:"drifted_accounts"`
 	Drift               []repository.AccountDrift   `json:"drift"`
 	DepositsByHour      []repository.HourlyDeposits `json:"deposits_by_hour"`
+	// Finance is the 24-hour house-side headline. Nil when the finance queries
+	// fail, so a broken aggregate degrades the two tiles rather than the whole
+	// dashboard -- this is the only piece here that touches every dashboard load.
+	Finance *FinanceHeadline `json:"finance"`
 }
 
 // ConnectionCounter is however the transport reports live sockets. Keeping it
@@ -74,6 +78,14 @@ func (s *AdminService) Dashboard(ctx context.Context) (*Dashboard, error) {
 	}
 	if s.connections != nil {
 		d.LiveConnections = s.connections.ClientCount()
+	}
+	// Last, and deliberately not fatal: two more queries on a screen that already
+	// runs eleven. If they fail the dashboard still renders and the finance tiles
+	// simply do not.
+	if headline, err := s.financeHeadline(ctx); err != nil {
+		s.log.Error("dashboard finance headline", "err", err)
+	} else {
+		d.Finance = headline
 	}
 	return d, nil
 }
