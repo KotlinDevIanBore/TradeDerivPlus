@@ -48,6 +48,96 @@ export interface Dashboard {
   drifted_accounts: number
   drift: AccountDrift[]
   deposits_by_hour: HourlyDeposits[]
+  /** The 24-hour finance headline. Null when nothing has settled. */
+  finance: FinanceHeadline | null
+}
+
+// --- Finance ---
+//
+// Every figure below is HOUSE-side: a positive house_pnl means the house is
+// ahead. The customer-side numbers are the negatives and are never shown, so the
+// two cannot be mixed. Decimals arrive as strings, like every other money field.
+
+export type FinanceRange = '24h' | '7d' | '30d' | 'all'
+
+export interface FinanceBucket {
+  contracts: number
+  wins: number
+  losses: number
+  voids: number
+  /** Excludes voids: a refunded contract never resolved, so it is not volume. */
+  stakes: string
+  house_pnl: string
+  bot_contracts: number
+  bot_house_pnl: string
+}
+
+export interface EdgeCheck {
+  sample_size: number
+  /** Fractions, not percentages: 0.024 is 2.4%. */
+  realised: string
+  theoretical: string
+  /** Server-side, so every consumer agrees when the comparison means anything. */
+  too_few_to_read: boolean
+  min_sample: number
+  /** Selections the pricer rejected. Always zero in a healthy system. */
+  unpriced: number
+}
+
+export interface FinanceTypeRow {
+  contract_type: string
+  /** Every funding bucket — what was played, not what it cost. */
+  contracts: number
+  real: FinanceBucket
+  promotional: FinanceBucket
+  edge: EdgeCheck
+}
+
+export interface FinanceDayRow {
+  day: string
+  contracts: number
+  real_stakes: string
+  real_house_pnl: string
+  promotional_house_pnl: string
+  demo_contracts: number
+}
+
+export interface FinanceFlows {
+  deposits: number
+  deposits_usd: string
+  withdrawals: number
+  withdrawals_usd: string
+  /** Customer money held. NOT profit. */
+  net_float_usd: string
+  /** Point-in-time: every real account's real balance, as at now. */
+  customer_liability_usd: string
+}
+
+export interface FinanceHeadline {
+  house_pnl_24h: string
+  stakes_24h: string
+  contracts_24h: number
+  edge: EdgeCheck
+}
+
+export interface FinanceReport {
+  /** "digit_contracts" — the scope, carried so the omission of CFD is visible. */
+  surface: string
+  from: string
+  to: string
+  generated_at: string
+  /** The business number: real accounts, real-funded stakes. */
+  real: FinanceBucket
+  /** Bonus-funded stakes on real accounts. A real cost, not trading performance. */
+  promotional: FinanceBucket
+  /** A count only. Demo money is not money. */
+  demo_contracts: number
+  edge: EdgeCheck
+  edge_real: EdgeCheck
+  by_type: FinanceTypeRow[]
+  by_day: FinanceDayRow[]
+  by_day_capped: boolean
+  flows: FinanceFlows
 }
 
 export interface AdminUserRow extends User {

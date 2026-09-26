@@ -10,6 +10,7 @@ import { AdminKYCQueue } from './screens/KYCQueue'
 import { AdminLogin } from './screens/AdminLogin'
 import { AdminPayouts } from './screens/Payouts'
 import { AdminTransactions } from './screens/Transactions'
+import { AdminFinance } from './screens/Finance'
 import { AdminUserDetailScreen } from './screens/UserDetail'
 import { AdminUsers } from './screens/Users'
 import { ChangePassword } from './screens/ChangePassword'
@@ -44,6 +45,7 @@ export default function AdminApp() {
         <Route path="users" element={<AdminUsers />} />
         <Route path="users/:id" element={<AdminUserDetailScreen />} />
         <Route path="transactions" element={<AdminTransactions />} />
+        <Route path="finance" element={<AdminFinance />} />
         <Route path="kyc" element={<AdminKYCQueue />} />
         <Route path="payouts" element={<AdminPayouts />} />
         <Route path="bot-runs" element={<AdminBotRuns />} />

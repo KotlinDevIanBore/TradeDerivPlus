@@ -11,6 +11,8 @@ import type {
   AdminUserRow,
   AuditEntry,
   Dashboard,
+  FinanceRange,
+  FinanceReport,
   KYCSubmission,
 } from './adminTypes'
 
@@ -113,6 +115,8 @@ export const adminApi = {
 
   // --- Reads ---
   dashboard: () => request<Dashboard>('/admin/dashboard'),
+
+  finance: (range: FinanceRange) => request<FinanceReport>(`/admin/finance${qs({ range })}`),
 
   users: (p: AdminListParams = {}) =>
     request<Page<AdminUserRow>>(
@@ -219,4 +223,5 @@ export const adminKeys = {
   audit: (p: unknown) => ['admin', 'audit', p] as const,
   botRuns: (p: unknown) => ['admin', 'bot-runs', p] as const,
   payouts: (p: unknown) => ['admin', 'payouts', p] as const,
+  finance: (range: string) => ['admin', 'finance', range] as const,
 }
