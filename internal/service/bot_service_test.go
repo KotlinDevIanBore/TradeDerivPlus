@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,5 +223,143 @@ func TestBotLimitsDefaults(t *testing.T) {
 	explicit := BotLimits{MinIntervalMS: 250, MaxRuns: 2}.withDefaults()
 	if explicit.MinIntervalMS != 250 || explicit.MaxRuns != 2 {
 		t.Errorf("explicit limits must survive, got %+v", explicit)
+	}
+}
+
+// The stake ceiling is a share of the balance, configurable and clamped. The
+// clamping is the point: an unset, negative or absurd fraction has to land on the
+// default rather than on "no limit", because the dangerous direction is upwards.
+func TestBotMaxStakeFractionDefaults(t *testing.T) {
+	cases := []struct {
+		name string
+		in   decimal.Decimal
+		want decimal.Decimal
+	}{
+		{"unset takes the default", decimal.Decimal{}, defaultBotMaxStakeFraction},
+		{"zero is not unlimited", dec("0"), defaultBotMaxStakeFraction},
+		{"negative is not unlimited", dec("-0.5"), defaultBotMaxStakeFraction},
+		{"a whole balance is allowed", dec("1"), dec("1")},
+		{"more than the balance is no cap at all, so it is refused", dec("1.5"), defaultBotMaxStakeFraction},
+		{"a configured share survives", dec("0.25"), dec("0.25")},
+		{"a small share survives", dec("0.005"), dec("0.005")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := BotLimits{MaxStakeFraction: tc.in}.withDefaults().MaxStakeFraction
+			if !got.Equal(tc.want) {
+				t.Errorf("MaxStakeFraction %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// The percentage in the refusal message is derived, not written out, so a
+// configured share cannot be enforced as one number and announced as another.
+func TestBotMaxStakePercentLabel(t *testing.T) {
+	cases := []struct{ fraction, want string }{
+		{"0.1", "10%"},
+		{"0.25", "25%"},
+		{"0.075", "7.5%"},
+		{"0.005", "0.5%"},
+		{"1", "100%"},
+	}
+	for _, tc := range cases {
+		s := &BotService{limits: BotLimits{MaxStakeFraction: dec(tc.fraction)}}
+		if got := s.MaxStakePercentLabel(); got != tc.want {
+			t.Errorf("fraction %s reads %q, want %q", tc.fraction, got, tc.want)
+		}
+	}
+
+	// And the default reads as the tenth it has always been, so this change is
+	// invisible to anyone who has not set the variable.
+	s := &BotService{limits: BotLimits{}.withDefaults()}
+	if got := s.MaxStakePercentLabel(); got != "10%" {
+		t.Errorf("the default reads %q, want 10%%", got)
+	}
+}
+
+// validateRunConfig is the only thing between a misconfigured run and a few
+// hundred contracts, and it needs no database: a service value with limits and a
+// per-contract ceiling is enough to test the whole policy. Only the balance
+// ceiling is covered here, because that is the rule that just became configurable.
+func botValidator(fraction string) *BotService {
+	return &BotService{
+		limits: BotLimits{MaxStakeFraction: dec(fraction)}.withDefaults(),
+		digits: &DigitService{limits: DigitLimits{MaxStake: dec("100")}},
+	}
+}
+
+func validStartRun(stake string) StartRunInput {
+	return StartRunInput{
+		Stake:      dec(stake),
+		IntervalMS: 1000,
+		Limits:     models.BotLimitsConfig{StopLoss: dec("10")},
+	}
+}
+
+func TestBotValidateRunConfigBalanceCeiling(t *testing.T) {
+	// $400 against a $100 per-contract ceiling, so every share under a quarter puts
+	// the balance ceiling below the per-contract one and this test measures the rule
+	// it means to measure rather than the one checked before it.
+	balance := dec("400")
+
+	cases := []struct {
+		name     string
+		fraction string
+		stake    string
+		wantMsg  string
+	}{
+		{name: "a tenth allows the tenth exactly", fraction: "0.1", stake: "40"},
+		{
+			name:     "a tenth refuses a cent past it",
+			fraction: "0.1",
+			stake:    "40.01",
+			wantMsg:  "An automated run can stake at most 10% of your balance, which is $40.00",
+		},
+		{name: "a configured fifth allows a stake a tenth refuses", fraction: "0.2", stake: "40.01"},
+		{
+			// The ceiling, the percentage and the refusal all have to follow the
+			// configured share together. A hardcoded 0.1 anywhere breaks one of them.
+			name:     "a configured fifth refuses past a fifth",
+			fraction: "0.2",
+			stake:    "80.01",
+			wantMsg:  "An automated run can stake at most 20% of your balance, which is $80.00",
+		},
+		{
+			name:     "a configured fortieth refuses a stake a tenth would allow",
+			fraction: "0.025",
+			stake:    "20",
+			wantMsg:  "An automated run can stake at most 2.5% of your balance, which is $10.00",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := botValidator(tc.fraction).validateRunConfig(validStartRun(tc.stake), balance)
+			if tc.wantMsg == "" {
+				if err != nil {
+					t.Fatalf("stake %s at %s of %s refused: %v", tc.stake, tc.fraction, balance, err)
+				}
+				return
+			}
+			var ve *ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("error %v, want a ValidationError", err)
+			}
+			if ve.Field != "stake" {
+				t.Errorf("field %q, want stake", ve.Field)
+			}
+			if ve.Message != tc.wantMsg {
+				t.Errorf("message:\n got %q\nwant %q", ve.Message, tc.wantMsg)
+			}
+		})
+	}
+
+	// The per-contract ceiling still wins when both are exceeded: it is the
+	// smaller of the two here, and it is the one a user can act on without
+	// depositing.
+	err := botValidator("0.5").validateRunConfig(validStartRun("150"), balance)
+	if err == nil || !strings.Contains(err.Error(), "on one contract") {
+		t.Errorf("error %v, want the per-contract ceiling to answer first", err)
 	}
 }

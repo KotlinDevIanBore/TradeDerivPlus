@@ -77,6 +77,7 @@ export function BotTicket({
   wallet,
   quote,
   maxStake,
+  maxStakeFraction,
   disabled,
   disabledReason,
   submitting,
@@ -95,6 +96,14 @@ export function BotTicket({
   quote?: DigitQuote
   /** The server's per-contract ceiling, shown as a hint so it is not a surprise. */
   maxStake?: string
+  /**
+   * The share of the balance one automated contract may stake, as a decimal
+   * fraction ("0.1" is a tenth). From /me rather than a constant here: the server
+   * enforces it, this is the same number said earlier, and there is deliberately
+   * no fallback — without it the ticket omits the hint and lets StartRun answer,
+   * which is the same arrangement `maxStake` uses.
+   */
+  maxStakeFraction?: string
   disabled: boolean
   disabledReason?: string
   submitting: boolean
@@ -138,15 +147,19 @@ export function BotTicket({
   // A run places repeatedly, so a stake that is a large share of the balance is a
   // different risk from the same stake placed once by hand. The server enforces
   // this; saying it here means a user meets it before pressing Start.
-  const stakeCeiling = available.mul(dec('0.1')).toDecimalPlaces(2)
+  const stakeCeiling = maxStakeFraction
+    ? available.mul(dec(maxStakeFraction)).toDecimalPlaces(2)
+    : null
+  // The fraction as a percentage for the message: 0.1 reads "10%", 0.075 "7.5%".
+  const ceilingPercent = maxStakeFraction ? `${dec(maxStakeFraction).mul(100)}%` : ''
 
   const stakeError =
     stake !== '' && stakeValue.lessThanOrEqualTo(0)
       ? 'Enter a stake greater than zero'
       : maxStake && stakeValue.greaterThan(dec(maxStake))
         ? `The most you can stake on one contract is ${money(maxStake)}`
-        : stakeValue.greaterThan(stakeCeiling)
-          ? `A run can stake at most a tenth of your balance, which is ${money(stakeCeiling.toString())}`
+        : stakeCeiling && stakeValue.greaterThan(stakeCeiling)
+          ? `A run can stake at most ${ceilingPercent} of your balance, which is ${money(stakeCeiling.toString())}`
           : error?.field === 'stake'
             ? error.message
             : undefined

@@ -45,6 +45,17 @@ func run() error {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(log)
 
+	// The first thing said, before anything acts on these values. A variable that
+	// was set and then ignored is the failure mode with no symptom: the deployment
+	// shows the intended figure, the process enforces the default, and nothing
+	// connects the two. Warn rather than refuse, because a running service with a
+	// conservative bound beats a service that will not boot — but say it loudly,
+	// every boot, until it is fixed.
+	for _, bad := range cfg.Ignored {
+		log.Warn("environment variable could not be parsed and was ignored",
+			"key", bad.Key, "value", bad.Value, "using", bad.Fallback)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -183,8 +194,9 @@ func run() error {
 	}
 
 	bots := service.NewBotService(store, digits, feed, settings, hub, service.BotLimits{
-		MinIntervalMS: cfg.BotMinIntervalMS,
-		MaxRuns:       cfg.BotMaxRuns,
+		MinIntervalMS:    cfg.BotMinIntervalMS,
+		MaxRuns:          cfg.BotMaxRuns,
+		MaxStakeFraction: decimal.NewFromFloat(cfg.BotMaxStakeBalanceFraction),
 	}, log)
 	bots.OnContract(observability.RecordBotContract)
 	bots.OnPlacement(observability.RecordBotPlacement)
@@ -236,7 +248,7 @@ func run() error {
 	// --- HTTP ---------------------------------------------------------------
 	deps := routes.Deps{Config: cfg, Log: log, Auth: auth, Admin: admin, Mpesa: mpesa, Payouts: payouts,
 		DocumentStub: documentStub}
-	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, cfg)
+	deps.Handler.Auth = handlers.NewAuthHandler(auth, settings, bots, cfg)
 	deps.Handler.Account = handlers.NewAccountHandler(wallet)
 	deps.Handler.Wallet = handlers.NewWalletHandler(wallet)
 	deps.Handler.Trade = handlers.NewTradeHandler(trading)

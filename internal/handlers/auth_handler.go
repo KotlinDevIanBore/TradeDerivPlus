@@ -15,11 +15,15 @@ import (
 type AuthHandler struct {
 	auth     *service.AuthService
 	settings *service.SettingsService
-	cfg      *config.Config
+	// bots is here for one field of /me: the run stake ceiling. Taken from the
+	// service rather than from cfg so the number the ticket shows is the number
+	// StartRun enforces, including after BotLimits has clamped a bad value.
+	bots *service.BotService
+	cfg  *config.Config
 }
 
-func NewAuthHandler(auth *service.AuthService, settings *service.SettingsService, cfg *config.Config) *AuthHandler {
-	return &AuthHandler{auth: auth, settings: settings, cfg: cfg}
+func NewAuthHandler(auth *service.AuthService, settings *service.SettingsService, bots *service.BotService, cfg *config.Config) *AuthHandler {
+	return &AuthHandler{auth: auth, settings: settings, bots: bots, cfg: cfg}
 }
 
 // authResponse is what the client receives. The refresh token is deliberately
@@ -169,6 +173,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		BotEnabled:            botEnabled,
 		BotRealMoneyEnabled:   botRealMoney,
 		DigitMaxStake:         decimal.NewFromFloat(h.cfg.DigitMaxStake).StringFixed(2),
+		BotMaxStakeFraction:   h.bots.MaxStakeFraction().String(),
 	})
 }
 
@@ -190,4 +195,9 @@ type meResponse struct {
 	// state it and refuse before a round trip rather than after one. A string,
 	// like every other amount, so the client parses it the same way.
 	DigitMaxStake string `json:"digit_max_stake"`
+	// BotMaxStakeFraction is the share of the balance one automated contract may
+	// stake, as a decimal fraction ("0.1" is a tenth). The auto ticket multiplies
+	// it by the balance for its own hint; sent rather than hardcoded so the two
+	// halves of the same rule cannot drift.
+	BotMaxStakeFraction string `json:"bot_max_stake_fraction"`
 }

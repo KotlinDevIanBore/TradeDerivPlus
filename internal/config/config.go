@@ -11,10 +11,32 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// BadValue is one environment variable that was set to something this process
+// could not parse, and the value it fell back to instead.
+type BadValue struct {
+	Key      string
+	Value    string
+	Fallback string
+}
+
 // Config is loaded once at boot. Nothing else in the app reads os.Getenv.
 type Config struct {
 	Env  string
 	Port string
+
+	// Ignored is every variable that was set but unparseable. Collected rather
+	// than logged here, because Load runs before the logger exists; main.go
+	// reports them the moment it can.
+	//
+	// This exists because a silent fallback is indistinguishable from a
+	// deliberate setting. DIGIT_MAX_STAKE="1,000,000" became a $100 ceiling with
+	// nothing in the logs and nothing wrong with the deployment to look at:
+	// strconv.ParseFloat has no locale awareness, the error was discarded, and
+	// the default looked chosen. Every variable reaching these parsers is a
+	// bound, a flag or an interval — several of them money-critical, none of
+	// them a secret — so the offending value is safe to print, and printing it
+	// is the whole point.
+	Ignored []BadValue
 
 	DatabaseURL string
 
@@ -52,6 +74,14 @@ type Config struct {
 	// directly and so never meets the HTTP rate limiter; these take its place.
 	BotMinIntervalMS int
 	BotMaxRuns       int
+
+	// BotMaxStakeBalanceFraction is the largest share of the account balance one
+	// automated contract may stake, as a fraction: 0.1 is a tenth. A run places
+	// repeatedly, so a stake that is a large share of the balance is a different
+	// risk from the same stake placed once by hand — this is that limit, and it is
+	// a product choice rather than a figure derived from the payout table. It is
+	// not a loss limit: the per-run stop loss is what bounds total loss.
+	BotMaxStakeBalanceFraction float64
 
 	// Daraja / M-Pesa
 	MpesaBaseURL        string
@@ -224,6 +254,8 @@ const MpesaReconcileMinAgeFloor = 60 * time.Second
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
+	ignored = nil
+
 	c := &Config{
 		Env:  getEnv("APP_ENV", "development"),
 		Port: getEnv("PORT", "8080"),
@@ -248,6 +280,8 @@ func Load() (*Config, error) {
 		BotRealMoneyEnabled: getBool("BOT_REAL_MONEY_ENABLED", false),
 		BotMinIntervalMS:    int(getFloat("BOT_MIN_INTERVAL_MS", 1000)),
 		BotMaxRuns:          int(getFloat("BOT_MAX_RUNS", 50)),
+
+		BotMaxStakeBalanceFraction: getFloat("BOT_MAX_STAKE_BALANCE_FRACTION", 0.1),
 
 		MpesaBaseURL:        getEnv("MPESA_BASE_URL", "https://sandbox.safaricom.co.ke"),
 		MpesaConsumerKey:    getEnv("MPESA_CONSUMER_KEY", ""),
@@ -315,6 +349,10 @@ func Load() (*Config, error) {
 		SentrySampleRate:  getFloat("SENTRY_SAMPLE_RATE", 1.0),
 		MetricsToken:      getEnv("METRICS_TOKEN", ""),
 	}
+
+	// Attached before the validations below, so a config that fails one still
+	// carries the reason a bound is not what the deployment says it is.
+	c.Ignored = ignored
 
 	if c.JWTSecret == "" {
 		if c.Env == "production" {
@@ -410,6 +448,19 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
+// ignored accumulates unparseable values for the Load in progress. A package
+// variable because the getters are plain functions called from one composite
+// literal; Load resets it and is not safe to call concurrently, which was
+// already true of it (godotenv.Load and os.Getenv are process-wide).
+var ignored []BadValue
+
+// note records a value this process could not parse. The fallback is recorded
+// alongside it: "BOT_MAX_RUNS was ignored" leaves a reader guessing what is
+// actually in force, which is the same problem one layer along.
+func note(key, value string, fallback any) {
+	ignored = append(ignored, BadValue{Key: key, Value: value, Fallback: fmt.Sprint(fallback)})
+}
+
 func getEnv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
@@ -423,6 +474,7 @@ func getBool(k string, def bool) bool {
 		if err == nil {
 			return b
 		}
+		note(k, v, def)
 	}
 	return def
 }
@@ -433,6 +485,7 @@ func getFloat(k string, def float64) float64 {
 		if err == nil {
 			return f
 		}
+		note(k, v, def)
 	}
 	return def
 }
@@ -443,6 +496,7 @@ func getDuration(k string, def time.Duration) time.Duration {
 		if err == nil {
 			return d
 		}
+		note(k, v, def)
 	}
 	return def
 }

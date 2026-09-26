@@ -53,6 +53,7 @@ function renderTicket(overrides: Partial<React.ComponentProps<typeof BotTicket>>
       wallet={wallet}
       quote={evenOddQuote}
       maxStake="100"
+      maxStakeFraction="0.1"
       disabled={false}
       submitting={false}
       error={null}
@@ -128,9 +129,9 @@ describe('BotTicket', () => {
       expect(onSubmit).not.toHaveBeenCalled()
     })
 
-    // A run places repeatedly, so a tenth of the balance is a different limit
+    // A run places repeatedly, so a share of the balance is a different limit
     // from the one the manual ticket applies.
-    it('refuses a stake above a tenth of the balance', async () => {
+    it('refuses a stake above the configured share of the balance', async () => {
       const user = userEvent.setup()
       const poor: Wallet = { ...wallet, bonus_balance: '50.00', total: '50.00' }
       const { onSubmit } = renderTicket({ wallet: poor })
@@ -140,10 +141,47 @@ describe('BotTicket', () => {
       await user.type(stake, '10')
 
       expect(
-        screen.getByText(/at most a tenth of your balance, which is \$5\.00/),
+        screen.getByText(/at most 10% of your balance, which is \$5\.00/),
       ).toBeInTheDocument()
       await user.click(screen.getByRole('button', { name: 'Start auto run' }))
       expect(onSubmit).not.toHaveBeenCalled()
+    })
+
+    // The share is server-configured, so the ticket has to follow it rather than
+    // restate a tenth. A test on 0.1 alone would pass against a hardcoded 0.1.
+    it('follows the server share rather than assuming a tenth', async () => {
+      const user = userEvent.setup()
+      const poor: Wallet = { ...wallet, bonus_balance: '50.00', total: '50.00' }
+      const { onSubmit } = renderTicket({ wallet: poor, maxStakeFraction: '0.25' })
+
+      const stake = screen.getByLabelText('Stake per contract')
+      await user.clear(stake)
+      await user.type(stake, '10')
+
+      // A tenth of $50 would refuse $10; a quarter ($12.50) allows it.
+      expect(screen.queryByText(/of your balance, which is/)).not.toBeInTheDocument()
+
+      await user.clear(stake)
+      await user.type(stake, '30')
+      expect(
+        screen.getByText(/at most 25% of your balance, which is \$12\.50/),
+      ).toBeInTheDocument()
+      await user.click(screen.getByRole('button', { name: 'Start auto run' }))
+      expect(onSubmit).not.toHaveBeenCalled()
+    })
+
+    // Without the share there is no client-side ceiling to state, and inventing
+    // one would be the hardcoded constant this prop exists to remove.
+    it('omits the balance ceiling entirely when the server has not said what it is', async () => {
+      const user = userEvent.setup()
+      const poor: Wallet = { ...wallet, bonus_balance: '50.00', total: '50.00' }
+      renderTicket({ wallet: poor, maxStakeFraction: undefined })
+
+      const stake = screen.getByLabelText('Stake per contract')
+      await user.clear(stake)
+      await user.type(stake, '40')
+
+      expect(screen.queryByText(/of your balance, which is/)).not.toBeInTheDocument()
     })
 
     it('requires a stop loss', async () => {

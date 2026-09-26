@@ -56,11 +56,26 @@ const (
 	botFinaliseTimeout = 5 * time.Second
 )
 
+// defaultBotMaxStakeFraction is the share of the balance one automated contract
+// may stake when BOT_MAX_STAKE_BALANCE_FRACTION says nothing. A tenth is a
+// product choice, not a figure derived from the payout table: it keeps a single
+// automated contract from being most of the account, and it means a run needs ten
+// losses in a row rather than one to empty it. It is deliberately not a loss
+// limit — the per-run stop loss is what bounds total loss, and at even/odd ten
+// consecutive losses is about a 1-in-1024 event, which a bot placing every two
+// seconds will meet.
+var defaultBotMaxStakeFraction = decimal.RequireFromString("0.1")
+
 // BotLimits bounds every run. A zero field takes the default; there is no way to
 // say "unlimited", for the same reason DigitLimits has none.
 type BotLimits struct {
 	MinIntervalMS int
 	MaxRuns       int
+
+	// MaxStakeFraction is the share of the account balance one contract may
+	// stake, as a fraction. Zero takes the default; so does anything above 1,
+	// which would be a cap larger than the balance and so no cap at all.
+	MaxStakeFraction decimal.Decimal
 }
 
 func (l BotLimits) withDefaults() BotLimits {
@@ -69,6 +84,9 @@ func (l BotLimits) withDefaults() BotLimits {
 	}
 	if l.MaxRuns <= 0 {
 		l.MaxRuns = defaultBotMaxRuns
+	}
+	if l.MaxStakeFraction.LessThanOrEqual(decimal.Zero) || l.MaxStakeFraction.GreaterThan(decimal.NewFromInt(1)) {
+		l.MaxStakeFraction = defaultBotMaxStakeFraction
 	}
 	return l
 }
@@ -436,10 +454,13 @@ func (s *BotService) validateRunConfig(in StartRunInput, balance decimal.Decimal
 		return invalid("stake", "The most you can stake on one contract is $"+s.digits.MaxStake().StringFixed(2))
 	}
 	// A run places repeatedly, so a stake that is a large share of the balance is
-	// a different risk from the same stake placed once by hand.
-	maxByBalance := balance.Mul(decimal.RequireFromString("0.1")).Round(2)
+	// a different risk from the same stake placed once by hand. The share is
+	// configurable (BOT_MAX_STAKE_BALANCE_FRACTION); the message names whatever it
+	// is set to, because a hint that says 10% while the server enforces something
+	// else is worse than no hint.
+	maxByBalance := balance.Mul(s.limits.MaxStakeFraction).Round(2)
 	if in.Stake.GreaterThan(maxByBalance) {
-		return invalid("stake", "An automated run can stake at most 10% of your balance, which is $"+maxByBalance.StringFixed(2))
+		return invalid("stake", "An automated run can stake at most "+s.MaxStakePercentLabel()+" of your balance, which is $"+maxByBalance.StringFixed(2))
 	}
 	if in.IntervalMS < s.limits.MinIntervalMS {
 		return invalid("interval_ms", fmt.Sprintf("The shortest interval between contracts is %d seconds", s.limits.MinIntervalMS/1000))
@@ -465,6 +486,19 @@ func (s *BotService) validateRunConfig(in StartRunInput, balance decimal.Decimal
 		return invalid("max_duration_s", "A run can last between 1 minute and 2 hours")
 	}
 	return nil
+}
+
+// MaxStakeFraction is the share of the balance one automated contract may stake,
+// after defaults and clamping. The /me payload sends this rather than the raw
+// config value so the ticket's own hint is the limit the server enforces, not a
+// second copy of it that can drift.
+func (s *BotService) MaxStakeFraction() decimal.Decimal { return s.limits.MaxStakeFraction }
+
+// MaxStakePercentLabel is that fraction written as a percentage for a message:
+// 0.1 reads "10%", 0.075 reads "7.5%". No trailing zeros, because "10.00%" in a
+// sentence reads like a figure with more precision behind it than there is.
+func (s *BotService) MaxStakePercentLabel() string {
+	return s.limits.MaxStakeFraction.Shift(2).String() + "%"
 }
 
 // StopRun asks a run to finish. It is idempotent: stopping a stopped run returns
