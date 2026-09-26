@@ -156,9 +156,50 @@ Desktop at 1280×800: the ticket computes `position: static` in its grid column 
 | `digit.layout.spec.ts` after fixes | **8 / 8** on digit-mobile and digit-narrow |
 | Full digit suite, `digit-mobile` + `digit-narrow` + `digit-desktop` | **38 passed, 0 failed**, 7 skipped (the cross-breakpoint skips), 4.3m — `digit-narrow` runs every digit spec at 14 ✓, same as Pixel 7 |
 | Full CFD suite, `mobile` + `mobile-narrow` + `desktop` | **47 passed, 0 failed**, 7 skipped, 5.1m — `mobile-narrow` runs every `user.*` spec at 13 ✓, same as Pixel 7; `admin.spec` and `user.deposit` included |
+| `admin.spec.ts` at CI's limiter values, after the helper fix | **7/7** |
+| Admin 429 branch, bucket drained | **recovers in 1615ms**; the old behaviour fails in 304ms with CI's message (§7.2) |
 | Visual pass | Screenshots at 375×667 (top, bottom, AUTO), 1280×800, register, admin dashboard/users/transactions; computed sizes read back (§4) |
 
 Exit codes read directly. Screenshots were taken with headless Chromium driven directly, because the desktop app's browser pane was hidden and does not paint while hidden.
+
+### 7.2 A CI failure this PR did not cause, and the helper fix folded in
+
+The first CI run on this branch failed one test — `admin.spec.ts:386`, in 199ms, at
+`loginAdmin` with **"no known admin password works"**. Go, Web and the digit e2e job all
+passed, and the CFD suite had been 47/47 locally an hour earlier.
+
+**It was the rate limiter, not the credential.** `POST /admin/login` shares a per-IP bucket
+with `/admin/refresh` and `/admin/logout` ([`routes.go:175`](../../internal/routes/routes.go) —
+`rate.Every(AUTH_RATE_EVERY*4)`, `AUTH_RATE_BURST/2`; in CI, **burst 12 refilling at
+1.25/s**). Each `loginAdmin` spends at least two tokens — an API probe plus the form submit —
+the console spends more refreshing, and `admin.spec.ts` signs in eight times. `loginAdmin`
+treated *any* non-OK as a wrong password and moved to the next candidate, so a 429 on both
+exhausted the list and blamed the credential, pointing the reader at `-reset-admin`, which
+would not have helped.
+
+**Shown, not asserted.** A temporary spec drained the bucket (`[401,…,429,429,…]`) and then
+called the helper:
+
+| Code | Result |
+|---|---|
+| Fixed helper | **Recovered after 1615ms** — one backoff cycle — token returned |
+| 429 handling mutated out (the old behaviour) | **Failed in 304ms** with the CI message verbatim: *"no known admin password works. Reset the console credential with:"* |
+
+304ms against CI's 199ms, same message. That is the failure reproduced and then fixed. The
+mutation was restored and hash-verified byte-identical.
+
+`signInAdmin` now treats a 429 as what it is: it stops probing a bucket that is already
+empty, retries with growing backoff (1.5s, 3s, 4.5s), and if it still cannot get in, says
+**rate limiting** and names the shared bucket rather than sending anyone to reset a password
+that was never wrong. It also caches the password that worked, so a run does not spend a
+refused attempt rediscovering it.
+
+**The probe spec was deleted rather than kept.** It deliberately drains a limiter the rest of
+the suite shares, and `workers: 1` means whatever runs next inherits an empty bucket. The
+evidence is above; the standing cost is not worth it.
+
+Nothing in this PR caused the failure — no change here touches the admin login path — but the
+fix belongs with it, because the next occurrence would be read the same wrong way.
 
 ### 7.1 Not verified
 

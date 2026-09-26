@@ -322,13 +322,7 @@ export async function originatorFor(transactionId: string) {
 
 /** An admin access token, for setup a test needs but is not testing. */
 export async function adminToken() {
-  for (const password of ADMIN_PASSWORDS) {
-    const res = await api('/admin/login', { method: 'POST', body: { username: 'admin', password } })
-    if (res.ok) {
-      return ((await res.json()) as { access_token: string }).access_token
-    }
-  }
-  throw new Error('no known admin password works; reset it with: go run ./cmd/seed -reset-admin')
+  return (await signInAdmin()).token
 }
 
 /** Registers through the UI, which is also how the signup path gets covered. */
@@ -395,30 +389,87 @@ export async function waitForDigitTicket(page: Page) {
  */
 export const ADMIN_PASSWORDS = ['admin123', 'e2eConsoleAdmin1']
 
-export async function loginAdmin(page: Page) {
-  for (const password of ADMIN_PASSWORDS) {
-    // Ask the API which password works before driving the form, so a failed
-    // attempt is not a flaky UI interaction.
-    const res = await api('/admin/login', {
-      method: 'POST',
-      body: { username: 'admin', password },
-    })
-    if (!res.ok) continue
+/**
+ * The password that last worked. Tried first next time, so a run does not spend
+ * a refused attempt rediscovering it.
+ */
+let knownAdminPassword: string | null = null
 
-    await page.goto('/admin/login')
-    await page.getByLabel('Username').fill('admin')
-    await page.getByLabel('Password').fill(password)
-    await page.getByRole('button', { name: 'Sign in' }).click()
+/**
+ * Signs in to the console API and reports which password did it.
+ *
+ * Careful about one thing, learned from a CI failure that read as "no known
+ * admin password works" when the credential was fine:
+ *
+ * `POST /admin/login` shares a per-IP rate limiter with `/admin/refresh` and
+ * `/admin/logout` (routes.go: rate.Every(AUTH_RATE_EVERY*4), AUTH_RATE_BURST/2 --
+ * in CI, burst 12 refilling at 1.25/s). Every console sign-in here costs at
+ * least two of those, plus whatever the console spends refreshing, and
+ * admin.spec.ts signs in eight times. So a 429 is a thing that happens, and it
+ * is NOT a wrong password: it is retried with backoff, and only reported as
+ * rate limiting if it survives that.
+ *
+ * The old loop treated any non-OK the same and moved on to the next candidate,
+ * so a rate-limited run exhausted the list and blamed the credential -- sending
+ * the reader to `-reset-admin`, which would not have helped.
+ */
+async function signInAdmin(): Promise<{ password: string; token: string }> {
+  const candidates = knownAdminPassword
+    ? [knownAdminPassword, ...ADMIN_PASSWORDS.filter((p) => p !== knownAdminPassword)]
+    : [...ADMIN_PASSWORDS]
 
-    // Wait for the login screen to be left behind. Matching /admin loosely
-    // would match /admin/login too and return before the session exists.
-    await page.waitForURL((url) => !url.pathname.endsWith('/admin/login'))
-    return
+  let rateLimited = false
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    rateLimited = false
+
+    for (const password of candidates) {
+      const res = await api('/admin/login', {
+        method: 'POST',
+        body: { username: 'admin', password },
+      })
+      if (res.ok) {
+        knownAdminPassword = password
+        return { password, token: ((await res.json()) as { access_token: string }).access_token }
+      }
+      // Stop rather than spend another token on a bucket that is already empty:
+      // the next candidate would be refused for the same reason and would tell
+      // us nothing about whether it is the right password.
+      if (res.status === 429) {
+        rateLimited = true
+        break
+      }
+    }
+
+    if (!rateLimited) break
+    // The bucket refills at about 1.25/s in CI. The backoff grows in case
+    // something else is drawing on it at the same time.
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1500))
   }
+
   throw new Error(
-    'no known admin password works. Reset the console credential with:\n' +
-      '  go run ./cmd/seed -reset-admin',
+    rateLimited
+      ? 'the admin login rate limiter refused every attempt over ~9s. This is not a bad ' +
+        'password: /admin/login shares a per-IP bucket with /admin/refresh and /admin/logout. ' +
+        'Raise AUTH_RATE_BURST for the run, or sign in fewer times.'
+      : 'no known admin password works. Reset the console credential with:\n' +
+        '  go run ./cmd/seed -reset-admin',
   )
+}
+
+export async function loginAdmin(page: Page) {
+  // Ask the API which password works before driving the form, so a failed
+  // attempt is not a flaky UI interaction.
+  const { password } = await signInAdmin()
+
+  await page.goto('/admin/login')
+  await page.getByLabel('Username').fill('admin')
+  await page.getByLabel('Password').fill(password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+
+  // Wait for the login screen to be left behind. Matching /admin loosely
+  // would match /admin/login too and return before the session exists.
+  await page.waitForURL((url) => !url.pathname.endsWith('/admin/login'))
 }
 
 /**
