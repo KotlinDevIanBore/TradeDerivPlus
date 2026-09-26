@@ -176,6 +176,7 @@ export function AppShell() {
         onOpenMenu={overlay.menu}
         onOpenSwitcher={overlay.accounts}
         onDeposit={overlay.deposit}
+        onWithdraw={overlay.withdraw}
       />
 
       {error ? (

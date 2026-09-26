@@ -27,6 +27,7 @@ export function TopBar({
   onOpenMenu,
   onOpenSwitcher,
   onDeposit,
+  onWithdraw,
 }: {
   account: Account | null
   wallet?: Wallet
@@ -34,6 +35,7 @@ export function TopBar({
   onOpenMenu: () => void
   onOpenSwitcher: () => void
   onDeposit: () => void
+  onWithdraw: () => void
 }) {
   const panel = usePanel()
   const me = useMe()
@@ -128,6 +130,22 @@ export function TopBar({
           <Button size="sm" onClick={onDeposit} aria-label="Deposit">
             <ArrowDownToLine className="h-4 w-4 min-[400px]:hidden" aria-hidden />
             <span className="hidden min-[400px]:inline">Deposit</span>
+          </Button>
+
+          {/* Desktop only: the drawer that carries Withdraw on a phone is
+              opened by a hamburger that is itself lg:hidden, so at this width
+              there was no way to reach it at all. Shown unconditionally, like
+              the drawer's entry -- a demo account, an unverified user and the
+              platform switch are all things WithdrawSheet explains, and a
+              control that is missing explains nothing. */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onWithdraw}
+            aria-label="Withdraw"
+            className="hidden lg:inline-flex"
+          >
+            Withdraw
           </Button>
 
           {/* Account is a panel like the others, but it belongs beside the
