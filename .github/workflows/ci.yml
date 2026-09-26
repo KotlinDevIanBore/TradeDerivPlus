@@ -201,7 +201,7 @@ jobs:
         # the config, digit-mobile and digit-desktop included, and this job's API
         # has the digit surface off — so they cannot pass here and are covered by
         # the e2e-digit job below against its own database.
-        run: npx playwright test --project=mobile --project=desktop
+        run: npx playwright test --project=mobile --project=mobile-narrow --project=desktop
         env:
           VITE_API_URL: http://localhost:8080/api/v1
           VITE_WS_URL: ws://localhost:8080/api/v1/ws
@@ -288,7 +288,7 @@ jobs:
 
       - name: Browser tests on the digit surface
         working-directory: web
-        run: npx playwright test --project=digit-mobile --project=digit-desktop
+        run: npx playwright test --project=digit-mobile --project=digit-narrow --project=digit-desktop
         env:
           VITE_API_URL: http://localhost:8080/api/v1
           VITE_WS_URL: ws://localhost:8080/api/v1/ws
