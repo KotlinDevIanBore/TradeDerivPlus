@@ -318,6 +318,7 @@ export function DigitTradeScreen() {
             wallet={wallet.data}
             quote={botQuote.data}
             maxStake={me.data?.digit_max_stake}
+            maxStakeFraction={me.data?.bot_max_stake_fraction}
             isReal={isReal}
             realMoneyEnabled={Boolean(me.data?.bot_real_money_enabled)}
             disabled={!tick || stale}

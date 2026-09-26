@@ -170,6 +170,13 @@ export interface User {
    * way, and this is the one copy that cannot drift from it.
    */
   digit_max_stake?: string
+  /**
+   * The share of the balance one automated contract may stake, as a decimal
+   * fraction: "0.1" is a tenth. Configurable server-side
+   * (BOT_MAX_STAKE_BALANCE_FRACTION), which is why the auto ticket reads it from
+   * here rather than carrying its own copy of the number.
+   */
+  bot_max_stake_fraction?: string
 }
 
 export type AccountStatus = 'active' | 'frozen'
