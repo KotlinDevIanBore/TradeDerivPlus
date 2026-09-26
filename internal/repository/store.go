@@ -28,6 +28,7 @@ type Store struct {
 	Audit          *AuditRepo
 	KYC            *KYCRepo
 	Settings       *SettingsRepo
+	Finance        *FinanceRepo
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -53,6 +54,7 @@ func newStore(pool *pgxpool.Pool, db DBTX) *Store {
 		Audit:          &AuditRepo{db},
 		KYC:            &KYCRepo{db},
 		Settings:       &SettingsRepo{db},
+		Finance:        &FinanceRepo{db},
 	}
 }
 

@@ -192,6 +192,7 @@ func New(d Deps) *gin.Engine {
 		middleware.RateLimit(rate.Limit(20), 60))
 	{
 		admin.GET("/dashboard", d.Handler.Admin.Dashboard)
+		admin.GET("/finance", d.Handler.Admin.Finance)
 		admin.GET("/users", d.Handler.Admin.Users)
 		admin.GET("/users/:id", d.Handler.Admin.UserDetail)
 		admin.GET("/transactions", d.Handler.Admin.Transactions)
