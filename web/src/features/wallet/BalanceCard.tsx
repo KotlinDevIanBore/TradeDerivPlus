@@ -88,12 +88,18 @@ export function BalanceCard({
           {isDemo ? 'Top up demo' : 'Deposit'}
         </Button>
 
-        {!isDemo ? (
-          <Button variant="outline" block onClick={onWithdraw} disabled={!canWithdraw}>
-            <ArrowUpFromLine className="h-4 w-4" aria-hidden />
-            Withdraw
-          </Button>
-        ) : null}
+        {/* Shown on a demo account too, and it was not before. Hiding it here was
+            the only thing covering WithdrawSheet's missing demo state, and it
+            covered exactly one of the three surfaces that offer Withdraw. The
+            sheet explains now, so all three agree: show, and let it explain.
+            On demo it is never disabled, because the hint below is suppressed
+            there -- a disabled button with nothing beside it explains less than
+            no button at all, which is the failure this undoes. Demo reaches the
+            sheet; the sheet says why. */}
+        <Button variant="outline" block onClick={onWithdraw} disabled={!isDemo && !canWithdraw}>
+          <ArrowUpFromLine className="h-4 w-4" aria-hidden />
+          Withdraw
+        </Button>
       </div>
 
       {!isDemo && !canWithdraw && withdrawHint ? (

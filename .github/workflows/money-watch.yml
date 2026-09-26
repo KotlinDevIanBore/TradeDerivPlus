@@ -1,0 +1,83 @@
+# The stopgap alarm, and the honest reason it exists.
+#
+# docs/investigation-money-mechanics.md finding 2: the Prometheus rules that guard
+# the money invariants were behind a docker-compose profile, pointed at
+# host.docker.internal, with no Alertmanager. All three are fixed in this pass --
+# but a compose stack still only alerts while somebody's machine is running it,
+# and production is Railway. This job needs no host at all: it runs on GitHub's
+# schedule, reads the authenticated /metrics endpoint, and FAILS if any money
+# invariant is broken. A failed scheduled workflow emails the repository owner by
+# default, which is the notification path.
+#
+# This is a stopgap, not the target state. The target is a hosted Prometheus
+# (Grafana Cloud, or Prometheus deployed beside the API) with the Alertmanager
+# added in this pass. Delete this file when that exists.
+name: Money watch
+
+on:
+  schedule:
+    # Every 30 minutes. Frequent enough that a drift is caught within one banking
+    # half-hour; infrequent enough to stay trivial against the Actions allowance.
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  invariants:
+    name: Money invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read the production metrics and check every money invariant
+        env:
+          METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
+          API: https://tradederivplus-production.up.railway.app
+        run: |
+          set -uo pipefail
+
+          # An unconfigured alarm is the problem this job exists to fix, so it
+          # fails loudly rather than passing quietly. Set the METRICS_TOKEN repo
+          # secret to the API's METRICS_TOKEN value.
+          if [ -z "${METRICS_TOKEN}" ]; then
+            echo "::error::METRICS_TOKEN secret is not set — the money alarm is NOT running."
+            exit 1
+          fi
+
+          if ! curl -sS --fail-with-body -m 30 \
+                -H "Authorization: Bearer ${METRICS_TOKEN}" \
+                "${API}/metrics" -o metrics.txt; then
+            echo "::error::Could not read ${API}/metrics — the alarm cannot see the API."
+            exit 1
+          fi
+
+          # Read one gauge. A metric absent from the output is NOT zero: it means
+          # the series was never set, so say so rather than reporting all-clear.
+          gauge() {
+            awk -v name="$1" '$1 == name { print $2; found=1 } END { if (!found) print "ABSENT" }' metrics.txt | tail -1
+          }
+
+          fail=0
+          check() {
+            name="$1"; human="$2"
+            value="$(gauge "$name")"
+            if [ "$value" = "ABSENT" ]; then
+              echo "::warning::${name} is absent from /metrics — cannot confirm ${human}"
+              return
+            fi
+            # Prometheus prints floats; compare numerically.
+            if awk -v v="$value" 'BEGIN { exit !(v+0 > 0) }'; then
+              echo "::error::${name} = ${value} — ${human}"
+              fail=1
+            else
+              echo "ok: ${name} = ${value}"
+            fi
+          }
+
+          # The invariant the whole money design rests on.
+          check ledger_drift_accounts \
+            "a wallet balance disagrees with its ledger. STOP processing withdrawals and investigate."
+          # Money already taken from a customer, with no automated path to resolve.
+          check mpesa_payouts_unknown \
+            "payout(s) of unknown outcome; the customer is already debited. Confirm against the Safaricom B2C portal, then resolve in the admin console."
+          check mpesa_payouts_given_up \
+            "open payout(s) past the give-up horizon; nothing is querying them any more."
+
+          exit $fail

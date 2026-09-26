@@ -171,6 +171,20 @@ type Config struct {
 	// MAX_DEPOSIT_KES; withdrawals had no ceiling at all before this.
 	MaxWithdrawKES    float64
 	MaxWithdrawDayKES float64
+	// The floor, in KES. Two jobs, and the second is the one that is easy to
+	// miss: it keeps a withdrawal large enough that rounding the payout up to a
+	// whole shilling (Daraja takes integers only) is immaterial against it, and
+	// it stops a request so small that the debit rounds to nothing while a whole
+	// shilling still leaves the business. See investigation-money-mechanics.md
+	// finding 4.
+	//
+	// PROVISIONAL, like the ceilings above. Safaricom's B2C-specific minimum
+	// could NOT be confirmed from Daraja's own documentation — the public API
+	// page 404s and the portal requires an account — so this is set to match
+	// MIN_DEPOSIT_KES and the documented KES 50 M-Pesa minimum agent withdrawal
+	// rather than to a figure anyone has verified for B2C. Confirm it with
+	// Safaricom before withdrawals are turned on.
+	MinWithdrawKES float64
 
 	// Signal bot
 	SignalInterval time.Duration
@@ -280,6 +294,7 @@ func Load() (*Config, error) {
 		WithdrawalsEnabled: getBool("WITHDRAWALS_ENABLED", false),
 		MaxWithdrawKES:     getFloat("MAX_WITHDRAW_KES", 150000),
 		MaxWithdrawDayKES:  getFloat("MAX_WITHDRAW_DAY_KES", 300000),
+		MinWithdrawKES:     getFloat("MIN_WITHDRAW_KES", 50),
 
 		SignalInterval: getDuration("SIGNAL_INTERVAL", 2*time.Minute),
 		SignalSymbols:  []string{"R_10", "R_25", "R_50", "R_75", "R_100", "BOOM500", "CRASH500", "EURUSD"},
@@ -371,6 +386,16 @@ func Load() (*Config, error) {
 	if c.MaxWithdrawDayKES < c.MaxWithdrawKES {
 		return nil, fmt.Errorf("MAX_WITHDRAW_DAY_KES (%.0f) must be at least MAX_WITHDRAW_KES (%.0f), or no withdrawal of the maximum size could ever be made",
 			c.MaxWithdrawDayKES, c.MaxWithdrawKES)
+	}
+	// Refused rather than defaulted: a zero or negative floor is not "no
+	// minimum", it is the guard silently absent, which is the state finding 4
+	// described.
+	if c.MinWithdrawKES <= 0 {
+		return nil, fmt.Errorf("MIN_WITHDRAW_KES must be positive")
+	}
+	if c.MinWithdrawKES > c.MaxWithdrawKES {
+		return nil, fmt.Errorf("MIN_WITHDRAW_KES (%.0f) must not exceed MAX_WITHDRAW_KES (%.0f), or no withdrawal could ever be made",
+			c.MinWithdrawKES, c.MaxWithdrawKES)
 	}
 	if c.MpesaReconcileMinAge < MpesaReconcileMinAgeFloor {
 		c.MpesaReconcileMinAge = MpesaReconcileMinAgeFloor

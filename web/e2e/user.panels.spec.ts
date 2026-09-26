@@ -234,3 +234,29 @@ test.describe('The History panel', () => {
     await expect(panelOf(page, 'Positions')).toBeVisible()
   })
 })
+
+test.describe('Money on a desktop', () => {
+  test('the top bar offers Withdraw, which the drawer cannot at this width', async ({ page }) => {
+    test.skip(!isWide(page), 'the phone reaches Withdraw through the drawer, covered above')
+
+    await register(page, newPhone())
+
+    const bar = page.getByRole('banner')
+
+    // Both money actions in the bar, on every surface. The hamburger that
+    // carries Withdraw on a phone is lg:hidden, so before this the only way
+    // to it at this width was two clicks into the History panel's balance card.
+    await expect(bar.getByRole('button', { name: 'Deposit' })).toBeVisible()
+    const withdraw = bar.getByRole('button', { name: 'Withdraw' })
+    await expect(withdraw).toBeVisible()
+
+    // It opens the shell's one withdraw sheet. Which face of it appears is the
+    // platform's business -- withdrawals off says so, an unverified user on an
+    // enabled platform is asked to verify -- and either is the sheet doing the
+    // explaining, which is why the button shows unconditionally.
+    await withdraw.click()
+    await expect(
+      page.getByRole('dialog', { name: /Withdraw to M-Pesa|Verification required/ }),
+    ).toBeVisible()
+  })
+})

@@ -549,12 +549,22 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 		return nil, ErrKYCRequired
 	}
 
-	if in.AmountUSD.LessThanOrEqual(decimal.Zero) {
+	// Round to cents FIRST, and use amountUSD everywhere below. The debit lands in
+	// a NUMERIC(18,2) column, so Postgres would round it anyway — but the KES
+	// figure that is sent to Daraja was previously computed from the unrounded
+	// request, so a request for $10.004 debited $10.00 and paid Ceil(1295.518) =
+	// 1296 KES. Deriving both from one rounded figure is what makes the debit and
+	// the payout agree. See investigation-money-mechanics.md finding 4.
+	amountUSD := in.AmountUSD.Round(2)
+	if amountUSD.LessThanOrEqual(decimal.Zero) {
 		return nil, invalid("amount", "Enter an amount greater than zero")
 	}
-	// Ceilings are expressed in KES, the currency the customer is paid in and the
-	// one Daraja's own limits are written in.
-	amountKES := s.usdToKES(in.AmountUSD)
+	// Ceilings and the floor are expressed in KES, the currency the customer is
+	// paid in and the one Daraja's own limits are written in.
+	amountKES := s.usdToKES(amountUSD)
+	if minKES := decimal.NewFromFloat(s.cfg.MinWithdrawKES); amountKES.LessThan(minKES) {
+		return nil, invalid("amount", "Minimum withdrawal is KES "+minKES.StringFixed(0))
+	}
 	maxKES := decimal.NewFromFloat(s.cfg.MaxWithdrawKES)
 	if amountKES.GreaterThan(maxKES) {
 		return nil, invalid("amount", "Maximum withdrawal is KES "+maxKES.StringFixed(0)+" per transaction")
@@ -589,7 +599,7 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 		}
 
 		// Only real balance is withdrawable; bonus never is.
-		if w.RealBalance.LessThan(in.AmountUSD) {
+		if w.RealBalance.LessThan(amountUSD) {
 			return ErrInsufficientFunds
 		}
 
@@ -609,7 +619,7 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 			AccountID:   account.ID,
 			Type:        models.TxWithdrawal,
 			BalanceType: models.BalanceReal,
-			Amount:      in.AmountUSD.Neg(),
+			Amount:      amountUSD.Neg(),
 			Status:      models.StatusPending,
 			Metadata: map[string]any{
 				"amount_kes": amountKES.StringFixed(2),
@@ -645,7 +655,7 @@ func (s *WalletService) Withdraw(ctx context.Context, in WithdrawInput) (*models
 			return err
 		}
 
-		w, err = st.Wallets.Adjust(ctx, account.ID, models.BalanceReal, in.AmountUSD.Neg())
+		w, err = st.Wallets.Adjust(ctx, account.ID, models.BalanceReal, amountUSD.Neg())
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				return ErrInsufficientFunds

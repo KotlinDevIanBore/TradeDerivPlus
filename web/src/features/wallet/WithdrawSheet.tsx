@@ -26,11 +26,16 @@ export function WithdrawSheet({
   onOpenChange,
   account,
   wallet,
+  realAccount,
+  onSwitchToReal,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   account: Account | null
   wallet?: Wallet
+  /** The user's real account, if they have one. */
+  realAccount: Account | null
+  onSwitchToReal: () => void
 }) {
   const user = useSessionStore((s) => s.user)
   const queryClient = useQueryClient()
@@ -65,6 +70,7 @@ export function WithdrawSheet({
     },
   })
 
+  const isDemo = account?.account_type === 'demo'
   const available = dec(wallet?.real_balance)
   const amountValue = dec(amount)
   const error = withdraw.error as ApiError | null
@@ -81,6 +87,40 @@ export function WithdrawSheet({
 
   const canSubmit = !amountError && !phoneError && amount !== '' && phone !== ''
   const kesAmount = rate.data ? amountValue.times(rate.data.kes_per_usd).toFixed(0) : null
+
+  // Demo first, before the platform gate and before verification.
+  //
+  // The API refuses a demo withdrawal outright (ErrDemoNotAllowed), so without
+  // this the sheet offered a full form -- prefilled phone, real balance, confirm
+  // step -- that could only ever end in a raw API error. BalanceCard used to hide
+  // the button entirely on a demo account, which covered this on one surface and
+  // left the drawer and top bar exposed; the cover is gone now and the
+  // explanation lives here, where every surface reaches it. See
+  // investigation-money-mechanics.md finding 3.
+  //
+  // Unlike DepositSheet, which routes a demo deposit to the real account, this
+  // only ever OFFERS the switch. Moving someone's withdrawal to a different
+  // account than the one they were looking at is not a courtesy.
+  if (isDemo) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange} title="Withdraw to M-Pesa">
+        <p className="text-body text-muted">
+          {realAccount
+            ? "You're on your demo account. Demo money isn't real, so there's nothing to withdraw — switch to your real account to take money out."
+            : "You're on your demo account. Demo money isn't real, so there's nothing to withdraw."}
+        </p>
+        {realAccount ? (
+          <Button block className="mt-5" onClick={onSwitchToReal}>
+            Switch to real account
+          </Button>
+        ) : (
+          <Button variant="ghost" block className="mt-5" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        )}
+      </Sheet>
+    )
+  }
 
   // Withdrawals are off until the M-Pesa payout exists. Stated plainly rather
   // than left as a form that debits the balance and pays nobody, and checked

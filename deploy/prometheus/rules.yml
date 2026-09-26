@@ -16,6 +16,40 @@ groups:
             A wallet balance disagrees with the sum of its ledger rows.
             Stop and investigate before processing further withdrawals.
 
+      # A payout whose outcome is genuinely unknown. The customer has ALREADY been
+      # debited and there is no safe automatic resolution: refunding might pay
+      # someone who was also paid by Safaricom, so the code deliberately refuses to
+      # guess and waits for a human. That makes this the one money alert where the
+      # alarm IS the remediation path -- nothing else will clear it.
+      #
+      # No `for:` clause. A stale deposit can resolve itself; this cannot, so there
+      # is no settling period worth waiting out.
+      - alert: PayoutOutcomeUnknown
+        expr: mpesa_payouts_unknown > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} payout(s) of unknown outcome, customer already debited"
+          description: >-
+            A B2C payout could not be confirmed either way. The balance is already
+            debited. Confirm each against the Safaricom B2C portal (Transaction
+            Status for the OriginatorConversationID), then resolve it in the admin
+            console as paid, failed, or never_received. Do not guess: a wrong
+            refund pays twice.
+
+      # Past the give-up horizon, so the reconciliation pass has stopped asking.
+      # Distinct from the above because nothing is looking any more -- these will
+      # sit until someone acts, however long that is.
+      - alert: PayoutGivenUp
+        expr: mpesa_payouts_given_up > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} open payout(s) past the give-up horizon"
+          description: >-
+            The reconciliation pass has stopped querying these. No automated path
+            will resolve them. Same remediation as PayoutOutcomeUnknown.
+
       # A Daraja outage shows up as failures long before users complain.
       - alert: DepositFailureRate
         expr: >-

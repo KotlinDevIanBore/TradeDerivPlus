@@ -176,6 +176,7 @@ export function AppShell() {
         onOpenMenu={overlay.menu}
         onOpenSwitcher={overlay.accounts}
         onDeposit={overlay.deposit}
+        onWithdraw={overlay.withdraw}
       />
 
       {error ? (
@@ -244,6 +245,11 @@ export function AppShell() {
         onOpenChange={onDismiss}
         account={account}
         wallet={wallet.data}
+        realAccount={realAccount}
+        onSwitchToReal={() => {
+          if (realAccount) setActiveAccount(realAccount.id)
+          overlay.close()
+        }}
       />
     </div>
   )

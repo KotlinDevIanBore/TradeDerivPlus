@@ -19,10 +19,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # No longer behind a profile. It was `profiles: ["observability"]`, which meant
+  # the ledger-drift alarm -- the one guarding the invariant the whole money design
+  # rests on -- only ran for someone who opted in. See
+  # docs/investigation-money-mechanics.md finding 2. Read the caveat in
+  # docs/implementation-money-mechanics-fixes.md before treating this as
+  # production monitoring: a compose stack on a laptop is not that.
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: tradederivplus-prometheus
-    profiles: ["observability"]
+    depends_on: [alertmanager]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
@@ -42,7 +48,6 @@ services:
   grafana:
     image: grafana/grafana:11.1.0
     container_name: tradederivplus-grafana
-    profiles: ["observability"]
     depends_on: [prometheus]
     environment:
       GF_SECURITY_ADMIN_USER: admin
@@ -58,7 +63,27 @@ services:
       - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
       - tdp_grafana:/var/lib/grafana
 
+  # Alertmanager was absent entirely, which meant a firing rule reached
+  # Prometheus's own web UI and stopped there -- nobody was notified of anything.
+  # Slack was chosen over PagerDuty or email because it needs one incoming-webhook
+  # URL and no account provisioning, SMTP relay or paid subscription: the cheapest
+  # thing that puts a critical money alert in front of a person.
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: tradederivplus-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    volumes:
+      # The whole directory, so the webhook-URL file can be absent on a fresh
+      # clone without docker creating a directory in its place. The real
+      # slack_webhook_url is gitignored; slack_webhook_url.example is not.
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+      - tdp_alertmanager:/alertmanager
+
 volumes:
   tdp_pgdata:
   tdp_prometheus:
   tdp_grafana:
+  tdp_alertmanager:
